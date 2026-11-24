@@ -269,6 +269,7 @@ function Sidebar({
   active,
   setActive,
   open,
+  onClose,
   compareCount,
   cartCount,
   wishlistCount,
@@ -278,129 +279,157 @@ function Sidebar({
   onOpenAuth,
   onLogout,
 }) {
+  const handleNavClick = (target) => {
+    setActive(target);
+    if (onClose) onClose();
+  };
+
   return (
-    <aside className={`sidebar ${open ? 'open' : ''}`}>
-      <div className="sidebar-label">EXPLORE</div>
-      <nav>
-        {navItems.map(([icon, label]) => (
+    <>
+      <div
+        className={`sidebar-backdrop ${open ? 'open' : ''}`}
+        onClick={onClose}
+        aria-hidden="true"
+      />
+      <aside className={`sidebar ${open ? 'open' : ''}`} aria-label="Main Navigation">
+        <div className="sidebar-header-row">
+          <div className="sidebar-label">EXPLORE</div>
           <button
-            className={active === label ? 'active' : ''}
-            key={label}
-            onClick={() => setActive(label)}
+            type="button"
+            className="sidebar-close-btn"
+            onClick={onClose}
+            aria-label="Close navigation menu"
           >
-            <span>{icon}</span>
-            {label}
-            {label === 'Deals' ? (
-              <em>HOT</em>
-            ) : label === 'Build Setup' ? (
-              <em className="sidebar-ai-pill">AI</em>
-            ) : label === 'Comparison' && compareCount > 0 ? (
-              <em>{compareCount}</em>
-            ) : label === 'Wishlist' && wishlistCount > 0 ? (
-              <em>{wishlistCount}</em>
-            ) : label === 'Cart' && cartCount > 0 ? (
-              <em>{cartCount}</em>
-            ) : null}
+            ✕
           </button>
-        ))}
-      </nav>
+        </div>
+        <nav>
+          {navItems.map(([icon, label]) => (
+            <button
+              className={active === label ? 'active' : ''}
+              key={label}
+              onClick={() => handleNavClick(label)}
+            >
+              <span>{icon}</span>
+              {label}
+              {label === 'Deals' ? (
+                <em>HOT</em>
+              ) : label === 'Build Setup' ? (
+                <em className="sidebar-ai-pill">AI</em>
+              ) : label === 'Comparison' && compareCount > 0 ? (
+                <em>{compareCount}</em>
+              ) : label === 'Wishlist' && wishlistCount > 0 ? (
+                <em>{wishlistCount}</em>
+              ) : label === 'Cart' && cartCount > 0 ? (
+                <em>{cartCount}</em>
+              ) : null}
+            </button>
+          ))}
+        </nav>
 
-      {/* Admin Central Link */}
-      <div className="sidebar-admin-box">
-        <button
-          type="button"
-          className={`sidebar-admin-btn ${active === 'Admin' ? 'active' : ''}`}
-          onClick={() => setActive('Admin')}
-        >
-          <span>⚙️</span>
-          Admin Dashboard
-          <em className="sidebar-admin-pill">ADMIN</em>
-        </button>
-      </div>
+        {/* Admin Central Link */}
+        <div className="sidebar-admin-box">
+          <button
+            type="button"
+            className={`sidebar-admin-btn ${active === 'Admin' ? 'active' : ''}`}
+            onClick={() => handleNavClick('Admin')}
+          >
+            <span>⚙️</span>
+            Admin Dashboard
+            <em className="sidebar-admin-pill">ADMIN</em>
+          </button>
+        </div>
 
-      {/* Sidebar User Status Card */}
-      <div className="sidebar-account-box">
-        {user ? (
-          <div className="sidebar-user-card">
-            <div className="sidebar-user-info">
-              <span className="sidebar-user-avatar">
-                {user.avatar || user.name.slice(0, 2).toUpperCase()}
-              </span>
-              <div className="sidebar-user-meta">
-                <strong>{user.name}</strong>
-                <small>{user.email}</small>
+        {/* Sidebar User Status Card */}
+        <div className="sidebar-account-box">
+          {user ? (
+            <div className="sidebar-user-card">
+              <div className="sidebar-user-info">
+                <span className="sidebar-user-avatar">
+                  {user.avatar || user.name.slice(0, 2).toUpperCase()}
+                </span>
+                <div className="sidebar-user-meta">
+                  <strong>{user.name}</strong>
+                  <small>{user.email}</small>
+                </div>
+              </div>
+              <div className="sidebar-user-actions">
+                <button type="button" className="text-button" onClick={() => handleNavClick('Profile')}>
+                  Profile
+                </button>
+                <span>·</span>
+                <button type="button" className="text-button" onClick={() => handleNavClick('Orders')}>
+                  Orders
+                </button>
+                <span>·</span>
+                <button
+                  type="button"
+                  className="text-button sidebar-logout-btn"
+                  onClick={() => {
+                    onLogout();
+                    if (onClose) onClose();
+                  }}
+                >
+                  Sign Out
+                </button>
               </div>
             </div>
-            <div className="sidebar-user-actions">
-              <button type="button" className="text-button" onClick={() => setActive('Profile')}>
-                Profile
-              </button>
-              <span>·</span>
-              <button type="button" className="text-button" onClick={() => setActive('Orders')}>
-                Orders
-              </button>
-              <span>·</span>
-              <button
-                type="button"
-                className="text-button sidebar-logout-btn"
-                onClick={onLogout}
-              >
-                Sign Out
-              </button>
-            </div>
+          ) : (
+            <button
+              type="button"
+              className="sidebar-signin-btn"
+              onClick={() => {
+                onOpenAuth('login');
+                if (onClose) onClose();
+              }}
+            >
+              <span>👤</span> Sign In / Register
+            </button>
+          )}
+        </div>
+
+        <div className="sidebar-theme-panel">
+          <div className="sidebar-theme-head">
+            <span className="sidebar-label">THEME</span>
+            <span className="sidebar-theme-pill">{theme === 'dark' ? 'Dark Mode' : 'Light Mode'}</span>
           </div>
-        ) : (
-          <button
-            type="button"
-            className="sidebar-signin-btn"
-            onClick={() => onOpenAuth('login')}
-          >
-            <span>👤</span> Sign In / Register
-          </button>
-        )}
-      </div>
-
-      <div className="sidebar-theme-panel">
-        <div className="sidebar-theme-head">
-          <span className="sidebar-label">THEME</span>
-          <span className="sidebar-theme-pill">{theme === 'dark' ? 'Dark Mode' : 'Light Mode'}</span>
+          <div className="theme-segmented-control" role="group" aria-label="Theme mode selector">
+            <button
+              type="button"
+              className={`theme-segment-btn ${theme === 'dark' ? 'active' : ''}`}
+              onClick={() => theme !== 'dark' && onToggleTheme()}
+              aria-pressed={theme === 'dark'}
+            >
+              <MoonIcon />
+              <span>Dark</span>
+            </button>
+            <button
+              type="button"
+              className={`theme-segment-btn ${theme === 'light' ? 'active' : ''}`}
+              onClick={() => theme !== 'light' && onToggleTheme()}
+              aria-pressed={theme === 'light'}
+            >
+              <SunIcon />
+              <span>Light</span>
+            </button>
+          </div>
         </div>
-        <div className="theme-segmented-control" role="group" aria-label="Theme mode selector">
-          <button
-            type="button"
-            className={`theme-segment-btn ${theme === 'dark' ? 'active' : ''}`}
-            onClick={() => theme !== 'dark' && onToggleTheme()}
-            aria-pressed={theme === 'dark'}
-          >
-            <MoonIcon />
-            <span>Dark</span>
-          </button>
-          <button
-            type="button"
-            className={`theme-segment-btn ${theme === 'light' ? 'active' : ''}`}
-            onClick={() => theme !== 'light' && onToggleTheme()}
-            aria-pressed={theme === 'light'}
-          >
-            <SunIcon />
-            <span>Light</span>
+
+        <div className="sidebar-card">
+          <span>⚡</span>
+          <strong>Need tech advice?</strong>
+          <small>Our Ahmedabad specialists are online to assist you.</small>
+          <button onClick={() => alert('Support chat: Our representatives are available 24/7.')}>
+            Start live chat →
           </button>
         </div>
-      </div>
 
-      <div className="sidebar-card">
-        <span>⚡</span>
-        <strong>Need tech advice?</strong>
-        <small>Our Ahmedabad specialists are online to assist you.</small>
-        <button onClick={() => alert('Support chat: Our representatives are available 24/7.')}>
-          Start live chat →
-        </button>
-      </div>
-
-      <div className="sidebar-footer">
-        <p>ElectroHaven Storefront</p>
-        <span>v2.4.0 · Pan-India</span>
-      </div>
-    </aside>
+        <div className="sidebar-footer">
+          <p>ElectroHaven Storefront</p>
+          <span>v2.4.0 · Pan-India</span>
+        </div>
+      </aside>
+    </>
   );
 }
 
@@ -1114,6 +1143,18 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
+  // Lock background scroll when mobile sidebar is open
+  useEffect(() => {
+    if (menuOpen) {
+      document.body.classList.add('sidebar-open-locked');
+    } else {
+      document.body.classList.remove('sidebar-open-locked');
+    }
+    return () => {
+      document.body.classList.remove('sidebar-open-locked');
+    };
+  }, [menuOpen]);
+
   // Save cart changes to localStorage
   useEffect(() => {
     saveStoredCart(cart);
@@ -1478,6 +1519,7 @@ export default function App() {
         active={activeNav}
         setActive={navigate}
         open={menuOpen}
+        onClose={() => setMenuOpen(false)}
         compareCount={compareIds.length}
         cartCount={cartCount}
         wishlistCount={wishlist.length}
