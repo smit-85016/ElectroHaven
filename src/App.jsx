@@ -277,6 +277,7 @@ function Sidebar({
   onToggleTheme,
   user,
   onOpenAuth,
+  onOpenSupport,
   onLogout,
 }) {
   const handleNavClick = (target) => {
@@ -418,9 +419,15 @@ function Sidebar({
         <div className="sidebar-card">
           <span>⚡</span>
           <strong>Need tech advice?</strong>
-          <small>Our Ahmedabad specialists are online to assist you.</small>
-          <button onClick={() => alert('Support chat: Our representatives are available 24/7.')}>
-            Start live chat →
+          <small>Our Ahmedabad specialists are ready to assist you.</small>
+          <button
+            type="button"
+            onClick={() => {
+              if (onOpenSupport) onOpenSupport();
+              if (onClose) onClose();
+            }}
+          >
+            Contact specialists →
           </button>
         </div>
 
@@ -430,6 +437,131 @@ function Sidebar({
         </div>
       </aside>
     </>
+  );
+}
+
+function SupportModal({ isOpen, onClose }) {
+  const [callbackRequested, setCallbackRequested] = useState(false);
+  const [callbackPhone, setCallbackPhone] = useState('');
+  const [callbackTopic, setCallbackTopic] = useState('Product Recommendation');
+
+  if (!isOpen) return null;
+
+  const handleRequestCallback = (e) => {
+    e.preventDefault();
+    if (!callbackPhone || callbackPhone.length < 10) return;
+    setCallbackRequested(true);
+    setTimeout(() => {
+      setCallbackRequested(false);
+      setCallbackPhone('');
+      onClose();
+    }, 2800);
+  };
+
+  return (
+    <div
+      className="support-modal-backdrop"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="support-dialog-title"
+    >
+      <div className="support-modal-card" onClick={(e) => e.stopPropagation()}>
+        <div className="support-modal-header">
+          <div className="support-modal-title-wrap">
+            <span className="support-modal-icon">⚡</span>
+            <div>
+              <h2 id="support-dialog-title">ElectroHaven Specialist Desk</h2>
+              <p>Direct assistance from our Ahmedabad consumer tech specialists</p>
+            </div>
+          </div>
+          <button
+            type="button"
+            className="support-modal-close"
+            onClick={onClose}
+            aria-label="Close support dialog"
+          >
+            ✕
+          </button>
+        </div>
+
+        <div className="support-modal-body">
+          <div className="support-contact-grid">
+            <div className="support-channel-card">
+              <span className="channel-icon">📞</span>
+              <strong>Phone Consultation</strong>
+              <p>+91 (079) 4000-8899</p>
+              <small>Store Hours: Mon–Sun, 10:30 AM – 9:30 PM</small>
+            </div>
+            <div className="support-channel-card">
+              <span className="channel-icon">💬</span>
+              <strong>WhatsApp Support</strong>
+              <p>+91 98765 43210</p>
+              <small>Direct query assistance during store hours</small>
+            </div>
+            <div className="support-channel-card">
+              <span className="channel-icon">✉</span>
+              <strong>Email Specialist Desk</strong>
+              <p>support@electrohaven.in</p>
+              <small>Response within 2–4 business hours</small>
+            </div>
+            <div className="support-channel-card">
+              <span className="channel-icon">🏬</span>
+              <strong>In-Store Tech Consultation</strong>
+              <p>5 Ahmedabad Flagship Stores</p>
+              <small>Vastrapur, CG Road, SG Highway, Prahlad Nagar, Bopal</small>
+            </div>
+          </div>
+
+          <div className="support-callback-section">
+            <h3>Request an Expert Callback</h3>
+            <p>Leave your number and a specialist from our Ahmedabad store will reach out to you.</p>
+
+            {callbackRequested ? (
+              <div className="support-success-msg" role="status">
+                ✓ Callback request received! An Ahmedabad specialist will call you shortly.
+              </div>
+            ) : (
+              <form className="support-callback-form" onSubmit={handleRequestCallback}>
+                <div className="support-form-row">
+                  <div className="auth-field" style={{ flex: 1 }}>
+                    <label htmlFor="support-phone">Mobile Number</label>
+                    <div className="auth-input-wrap">
+                      <span className="auth-input-prefix">+91</span>
+                      <input
+                        id="support-phone"
+                        type="tel"
+                        maxLength={10}
+                        placeholder="9876543210"
+                        value={callbackPhone}
+                        onChange={(e) => setCallbackPhone(e.target.value.replace(/\D/g, ''))}
+                        required
+                      />
+                    </div>
+                  </div>
+                  <div className="auth-field" style={{ flex: 1 }}>
+                    <label htmlFor="support-topic">Topic of Guidance</label>
+                    <select
+                      id="support-topic"
+                      value={callbackTopic}
+                      onChange={(e) => setCallbackTopic(e.target.value)}
+                    >
+                      <option value="Product Recommendation">Product Recommendation</option>
+                      <option value="Store Pickup / Availability">Store Pickup / Availability</option>
+                      <option value="AI Setup Builder Assistance">AI Setup Builder Assistance</option>
+                      <option value="Warranty & Repair Service">Warranty &amp; Repair Service</option>
+                    </select>
+                  </div>
+                </div>
+                <button type="submit" className="primary support-submit-btn">
+                  Request Free Callback <b>→</b>
+                </button>
+              </form>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -1103,6 +1235,7 @@ export default function App() {
   const [wishlist, setWishlist] = useState([]);
   const [compareIds, setCompareIds] = useState([]);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [supportModalOpen, setSupportModalOpen] = useState(false);
   const [previousPage, setPreviousPage] = useState('Home');
   const [preferredStore, setPreferredStore] = useState(() => getSavedPreferredStore());
   const [deliveryPincode, setDeliveryPincode] = useState(() => getSavedPincode());
@@ -1527,7 +1660,13 @@ export default function App() {
         onToggleTheme={toggleTheme}
         user={user}
         onOpenAuth={(mode) => openAuthPage(mode, 'Home')}
+        onOpenSupport={() => setSupportModalOpen(true)}
         onLogout={handleLogout}
+      />
+
+      <SupportModal
+        isOpen={supportModalOpen}
+        onClose={() => setSupportModalOpen(false)}
       />
 
       <main>
