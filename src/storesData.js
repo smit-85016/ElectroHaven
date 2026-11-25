@@ -187,9 +187,22 @@ export function getGoogleMapsUrl(store) {
   return `https://www.google.com/maps/search/?api=1&query=${query}`;
 }
 
+function resolveStoreDestination(store) {
+  if (store?.coordinates?.lat != null && store?.coordinates?.lng != null) {
+    return `${store.coordinates.lat},${store.coordinates.lng}`;
+  }
+  const matched = store?.id
+    ? ahmedabadStores.find((s) => s.id === store.id)
+    : null;
+  if (matched?.coordinates?.lat != null && matched?.coordinates?.lng != null) {
+    return `${matched.coordinates.lat},${matched.coordinates.lng}`;
+  }
+  return encodeURIComponent(`${store?.name || 'ElectroHaven'}, ${store?.address || 'Ahmedabad, Gujarat'}`);
+}
+
 // Generate Google Maps Directions URL
 export function getGoogleMapsDirectionsUrl(store, userCoords = null) {
-  const destination = `${store.coordinates.lat},${store.coordinates.lng}`;
+  const destination = resolveStoreDestination(store);
   if (userCoords && userCoords.lat && userCoords.lng) {
     const origin = `${userCoords.lat},${userCoords.lng}`;
     return `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${destination}`;
@@ -199,7 +212,8 @@ export function getGoogleMapsDirectionsUrl(store, userCoords = null) {
 
 // Generate Embedded Map URL (for iframe)
 export function getGoogleMapsEmbedUrl(store) {
-  return `https://maps.google.com/maps?q=${store.coordinates.lat},${store.coordinates.lng}&hl=en&z=15&output=embed`;
+  const query = resolveStoreDestination(store);
+  return `https://maps.google.com/maps?q=${query}&hl=en&z=15&output=embed`;
 }
 
 // LocalStorage helpers to save preferred store for future product availability integration

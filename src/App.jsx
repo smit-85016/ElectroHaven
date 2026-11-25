@@ -3,7 +3,13 @@ import { categories, compareProducts, currencyInfo, navItems, products as defaul
 import { formatINR } from './currency';
 import { getStoredCart, saveStoredCart } from './cart';
 import { getCurrentUser, logoutUser, seedDemoAccountIfNeeded, isAdminUser } from './auth';
-import { getAdminProducts, ADMIN_DATA_CHANGED_EVENT } from './adminData';
+import { getAdminProducts, getAdminDealOffers, ADMIN_DATA_CHANGED_EVENT } from './adminData';
+import {
+  applyOffersToProducts,
+  getHotDealProducts,
+  isOfferCurrentlyActive,
+  isProductFeaturedInHotDeals,
+} from './dealsUtils';
 import { parseCurrentRoute, persistRoute } from './router';
 import { subscribeToRealtimeSync, synchronizeCartWithLatestProducts } from './realtimeSync';
 import AdminDashboard from './AdminDashboard';
@@ -73,6 +79,87 @@ function MoonIcon({ className = '', size = 18 }) {
   );
 }
 
+function BrandMark({ size = 20 }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <rect x="3" y="3" width="18" height="18" rx="4" />
+      <path d="M8.5 8h7M8.5 12h5.5M8.5 16h7M8.5 8v8" />
+    </svg>
+  );
+}
+
+function MenuIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+      <line x1="3" y1="6" x2="21" y2="6" />
+      <line x1="3" y1="12" x2="21" y2="12" />
+      <line x1="3" y1="18" x2="21" y2="18" />
+    </svg>
+  );
+}
+
+function StorePinIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" />
+      <circle cx="12" cy="10" r="3" />
+    </svg>
+  );
+}
+
+function UserOutlineIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
+      <circle cx="12" cy="7" r="4" />
+    </svg>
+  );
+}
+
+function HeartOutlineIcon() {
+  return (
+    <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z" />
+    </svg>
+  );
+}
+
+function CartOutlineIcon() {
+  return (
+    <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="8" cy="21" r="1" />
+      <circle cx="19" cy="21" r="1" />
+      <path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57l1.65-7.43H5.12" />
+    </svg>
+  );
+}
+
+function SetupSlidersIcon({ size = 15 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <line x1="4" y1="21" x2="4" y2="14" />
+      <line x1="4" y1="10" x2="4" y2="3" />
+      <line x1="12" y1="21" x2="12" y2="12" />
+      <line x1="12" y1="8" x2="12" y2="3" />
+      <line x1="20" y1="21" x2="20" y2="16" />
+      <line x1="20" y1="12" x2="20" y2="3" />
+      <line x1="1" y1="14" x2="7" y2="14" />
+      <line x1="9" y1="8" x2="15" y2="8" />
+      <line x1="17" y1="16" x2="23" y2="16" />
+    </svg>
+  );
+}
+
 function Header({
   cartCount,
   wishlistCount,
@@ -100,7 +187,7 @@ function Header({
   return (
     <header className="topbar">
       <button className="mobile-menu" aria-label="Open menu" onClick={onMenu}>
-        ☰
+        <MenuIcon />
       </button>
       <a
         className="logo"
@@ -111,7 +198,9 @@ function Header({
           onHome();
         }}
       >
-        <span className="logo-mark">E</span>
+        <span className="logo-mark">
+          <BrandMark size={17} />
+        </span>
         <span>
           Electro<span>Haven</span>
         </span>
@@ -125,24 +214,15 @@ function Header({
         onSelectCategory={onSelectCategory}
       />
       <div className="header-actions">
-        {isAdminUser(user) && (
-          <button
-            type="button"
-            className="header-admin-pill-btn"
-            onClick={onOpenAdmin}
-            title="Open ElectroHaven Admin Central"
-          >
-            ⚡ Admin Panel
-          </button>
-        )}
-
         <button
           className="header-store-btn"
           onClick={onStores}
           title="Store Locator"
           aria-label="Open Store Locator"
         >
-          <span className="store-pin-icon">📍</span>
+          <span className="store-pin-icon">
+            <StorePinIcon />
+          </span>
           <span className="header-store-text">
             <small>My Store</small>
             <b>{preferredStore ? preferredStore.locality : 'Ahmedabad'}</b>
@@ -163,7 +243,7 @@ function Header({
             }}
           >
             <span className="avatar">
-              {user ? user.avatar || user.name.slice(0, 2).toUpperCase() : '👤'}
+              {user ? user.avatar || user.name.slice(0, 2).toUpperCase() : <UserOutlineIcon />}
             </span>
             <span>
               {user ? `Hi, ${user.name.split(' ')[0]}` : 'Sign In'}
@@ -251,14 +331,16 @@ function Header({
           aria-label={`Open wishlist, ${wishlistCount} items`}
           onClick={onWishlist}
         >
-          ♡{wishlistCount > 0 && <span className="wishlist-count">{wishlistCount}</span>}
+          <HeartOutlineIcon />
+          {wishlistCount > 0 && <span className="wishlist-count">{wishlistCount}</span>}
         </button>
         <button
           className="cart-button"
           aria-label={`Open cart, ${cartCount} items`}
           onClick={onCart}
         >
-          🛒<i>{cartCount}</i>
+          <CartOutlineIcon />
+          <i>{cartCount}</i>
         </button>
       </div>
     </header>
@@ -328,18 +410,20 @@ function Sidebar({
           ))}
         </nav>
 
-        {/* Admin Central Link */}
-        <div className="sidebar-admin-box">
-          <button
-            type="button"
-            className={`sidebar-admin-btn ${active === 'Admin' ? 'active' : ''}`}
-            onClick={() => handleNavClick('Admin')}
-          >
-            <span>⚙️</span>
-            Admin Dashboard
-            <em className="sidebar-admin-pill">ADMIN</em>
-          </button>
-        </div>
+        {/* Admin Central Link (Authorized Administrators Only) */}
+        {isAdminUser(user) && (
+          <div className="sidebar-admin-box">
+            <button
+              type="button"
+              className={`sidebar-admin-btn ${active === 'Admin' ? 'active' : ''}`}
+              onClick={() => handleNavClick('Admin')}
+            >
+              <span>⚙️</span>
+              Admin Dashboard
+              <em className="sidebar-admin-pill">ADMIN</em>
+            </button>
+          </div>
+        )}
 
         {/* Sidebar User Status Card */}
         <div className="sidebar-account-box">
@@ -417,7 +501,12 @@ function Sidebar({
         </div>
 
         <div className="sidebar-card">
-          <span>⚡</span>
+          <span className="sidebar-advice-icon" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3 18v-6a9 9 0 0 1 18 0v6" />
+              <path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z" />
+            </svg>
+          </span>
           <strong>Need tech advice?</strong>
           <small>Our Ahmedabad specialists are ready to assist you.</small>
           <button
@@ -569,17 +658,17 @@ function Hero({ onBuildSetup }) {
   return (
     <section className="hero">
       <div className="hero-copy">
-        <span className="eyebrow">CROMA-INSPIRED PREMIUM ELECTRONICS</span>
+        <span className="eyebrow">OFFICIAL MULTI-BRAND STORE · PAN-INDIA</span>
         <h1>
           Future-Ready Tech.<br />
           <span>Authentic Flagships.</span>
         </h1>
         <p>
-          Experience genuine consumer electronics from Apple, Samsung, Sony, HP, Dell, and Lenovo with express Pan-India shipping and local store pickup.
+          Discover genuine consumer electronics from Apple, Samsung, Sony, HP, Dell, and Lenovo with express Pan-India shipping and same-day local store pickup.
         </p>
         <div className="hero-buttons">
           <button className="primary" onClick={scrollToDeals}>
-            Explore Hot Deals <b>↯</b>
+            Explore Hot Deals <b>→</b>
           </button>
           {onBuildSetup && (
             <button
@@ -587,7 +676,7 @@ function Hero({ onBuildSetup }) {
               className="hero-builder-trigger-btn"
               onClick={onBuildSetup}
             >
-              <span>🪄</span> Build Your Setup (AI)
+              <SetupSlidersIcon size={15} /> Build Your Setup (AI)
             </button>
           )}
           <button
@@ -600,25 +689,63 @@ function Hero({ onBuildSetup }) {
           </button>
         </div>
         <div className="hero-note">
-          <span>✓ Genuine Brand Warranty</span> · <span>✓ Free Express Delivery</span> · <span>✓ Store Pickup</span>
+          <span>✓ Genuine Brand Warranty</span>
+          <span>✓ Free Express Delivery</span>
+          <span>✓ 5 Ahmedabad Pickup Stores</span>
         </div>
       </div>
 
       <div className="hero-visual" aria-hidden="true">
-        <div className="orbit" />
-        <div className="orbit-two" />
-        <div className="laptop">
-          <div className="laptop-screen">
-            <div className="screen-glow">
-              Electro<span>Haven</span>
+        <div className="hero-showcase">
+          <div className="hero-showcase-main">
+            <div className="hero-showcase-media">
+              <img
+                src="/products/apple-macbook-pro-14.jpg"
+                alt="Apple MacBook Pro 14 M3 Pro"
+                onError={handleProductImageError}
+              />
             </div>
-            <div className="screen-line" />
+            <div className="hero-showcase-meta">
+              <span className="hero-showcase-tag">Computing</span>
+              <strong>MacBook Pro 14&quot; M3 Pro</strong>
+            </div>
           </div>
-          <div className="laptop-base" />
+
+          <div className="hero-showcase-side">
+            <div className="hero-showcase-mini">
+              <div className="hero-showcase-mini-media">
+                <img
+                  src="/products/apple-iphone-16-pro.jpg"
+                  alt="Apple iPhone 16 Pro"
+                  onError={handleProductImageError}
+                />
+              </div>
+              <div className="hero-showcase-mini-meta">
+                <span>Smartphones</span>
+                <strong>iPhone 16 Pro</strong>
+              </div>
+            </div>
+
+            <div className="hero-showcase-mini">
+              <div className="hero-showcase-mini-media">
+                <img
+                  src="/products/sony-wh-1000xm5.jpg"
+                  alt="Sony WH-1000XM5 Headphones"
+                  onError={handleProductImageError}
+                />
+              </div>
+              <div className="hero-showcase-mini-meta">
+                <span>Acoustics</span>
+                <strong>Sony WH-1000XM5</strong>
+              </div>
+            </div>
+          </div>
         </div>
-        <div className="float-chip">
-          <span>OFFICIAL STORES</span>
-          <b>Ahmedabad Hub</b>
+
+        <div className="hero-hub-strip">
+          <span className="hero-hub-dot" />
+          <span>Ahmedabad Flagship Hub</span>
+          <b>In-Stock · Ready for Pickup</b>
         </div>
       </div>
     </section>
@@ -660,28 +787,51 @@ function Benefits() {
   return (
     <div className="benefits">
       <div>
-        <span>🚚</span>
+        <span className="benefit-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <rect x="1" y="3" width="15" height="13" rx="2" />
+            <polygon points="16 8 20 8 23 11 23 16 16 16 16 8" />
+            <circle cx="5.5" cy="18.5" r="2.5" />
+            <circle cx="18.5" cy="18.5" r="2.5" />
+          </svg>
+        </span>
         <p>
           <b>Fast Delivery</b>
           <small>Free delivery above ₹4,747</small>
         </p>
       </div>
       <div>
-        <span>🛡</span>
+        <span className="benefit-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+            <path d="m9 12 2 2 4-4" />
+          </svg>
+        </span>
         <p>
           <b>100% Authentic</b>
           <small>Direct from official brands</small>
         </p>
       </div>
       <div>
-        <span>↺</span>
+        <span className="benefit-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+            <path d="M3 3v5h5" />
+          </svg>
+        </span>
         <p>
           <b>Easy 7-Day Returns</b>
           <small>Hassle-free replacement policy</small>
         </p>
       </div>
       <div>
-        <span>🏬</span>
+        <span className="benefit-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M3 9l2-5h14l2 5" />
+            <path d="M3 9v11a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1V9" />
+            <path d="M9 21V13h6v8" />
+          </svg>
+        </span>
         <p>
           <b>5 Local Stores</b>
           <small>Express pickup in Ahmedabad</small>
@@ -710,7 +860,9 @@ function ProductCard({
           onClick={() => toggleWishlist(product.id)}
           aria-label={wishlist ? `Remove ${product.name} from wishlist` : `Add ${product.name} to wishlist`}
         >
-          {wishlist ? '♥' : '♡'}
+          <svg width="16" height="16" viewBox="0 0 24 24" fill={wishlist ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z" />
+          </svg>
         </button>
         <img
           src={product.image}
@@ -806,6 +958,63 @@ function ProductSection({
   );
 }
 
+function HotDealsSection({
+  deals = [],
+  search = '',
+  addToCart,
+  wishlist,
+  toggleWishlist,
+  compareIds,
+  toggleCompare,
+  onViewProduct,
+  onViewAllDeals,
+}) {
+  const visibleDeals = useMemo(() => {
+    const queryFiltered = !search
+      ? deals
+      : deals.filter((p) => searchProducts([p], search).length > 0);
+    // Prioritize active Flash Sale / Price Crash events first, then high-discount deals
+    return [...queryFiltered]
+      .sort((a, b) => (b.activeOffer ? 1 : 0) - (a.activeOffer ? 1 : 0))
+      .slice(0, 8);
+  }, [deals, search]);
+
+  return (
+    <section className="section" id="deals">
+      <div className="section-head">
+        <div>
+          <p className="kicker">LIMITED TIME OFFERS</p>
+          <h2>Hot Deals</h2>
+        </div>
+        <button className="text-button" onClick={onViewAllDeals}>
+          View all ({deals.length}) <b>→</b>
+        </button>
+      </div>
+      {visibleDeals.length > 0 ? (
+        <div className="product-grid">
+          {visibleDeals.map((product) => (
+            <ProductCard
+              key={product.id}
+              product={product}
+              addToCart={addToCart}
+              wishlist={wishlist.includes(product.id)}
+              toggleWishlist={toggleWishlist}
+              comparing={compareIds.includes(product.id)}
+              compareLimitReached={compareIds.length >= 4 && !compareIds.includes(product.id)}
+              toggleCompare={toggleCompare}
+              onViewProduct={onViewProduct}
+            />
+          ))}
+        </div>
+      ) : (
+        <div className="empty-state">
+          No active Hot Deals right now. Check back soon or explore our catalog below.
+        </div>
+      )}
+    </section>
+  );
+}
+
 const catalogPages = {
   Phones: { title: 'Flagship Smartphones', kicker: 'NEXT-GEN MOBILITY', category: 'phones' },
   Laptops: { title: 'High-Performance Laptops', kicker: 'PORTABLE COMPUTING', category: 'laptops' },
@@ -831,7 +1040,7 @@ function CatalogPage({
   const config = catalogPages[page] || { title: page, kicker: 'CATALOGUE', category: 'all' };
   const pageProducts = products.filter((p) => {
     const matchesCat = !config.category || config.category === 'all' || p.category === config.category;
-    const matchesDeals = !config.dealsOnly || p.isHotDeal || (p.discount && p.discount.includes('OFF'));
+    const matchesDeals = !config.dealsOnly || isProductFeaturedInHotDeals(p);
     const matchesSearch = !search || searchProducts([p], search).length > 0;
     return matchesCat && matchesDeals && matchesSearch;
   });
@@ -843,25 +1052,33 @@ function CatalogPage({
           <p className="kicker">{config.kicker}</p>
           <h1>{config.title}</h1>
           <p className="catalog-description">
-            Showing {pageProducts.length} authentic models available for immediate delivery.
+            {config.dealsOnly
+              ? `Showing ${pageProducts.length} active high-discount (20%+), Flash Sale, and Price Crash deals.`
+              : `Showing ${pageProducts.length} authentic models available for immediate delivery.`}
           </p>
         </div>
       </div>
-      <div className="product-grid">
-        {pageProducts.map((product) => (
-          <ProductCard
-            key={product.id}
-            product={product}
-            addToCart={addToCart}
-            wishlist={wishlist.includes(product.id)}
-            toggleWishlist={toggleWishlist}
-            comparing={compareIds.includes(product.id)}
-            compareLimitReached={compareIds.length >= 4 && !compareIds.includes(product.id)}
-            toggleCompare={toggleCompare}
-            onViewProduct={onViewProduct}
-          />
-        ))}
-      </div>
+      {pageProducts.length > 0 ? (
+        <div className="product-grid">
+          {pageProducts.map((product) => (
+            <ProductCard
+              key={product.id}
+              product={product}
+              addToCart={addToCart}
+              wishlist={wishlist.includes(product.id)}
+              toggleWishlist={toggleWishlist}
+              comparing={compareIds.includes(product.id)}
+              compareLimitReached={compareIds.length >= 4 && !compareIds.includes(product.id)}
+              toggleCompare={toggleCompare}
+              onViewProduct={onViewProduct}
+            />
+          ))}
+        </div>
+      ) : (
+        <div className="empty-state">
+          No active deals match your current filter. Check back later for new offers!
+        </div>
+      )}
     </section>
   );
 }
@@ -1110,27 +1327,36 @@ function Promos() {
             <br />
             for your old device
           </h2>
-          <p>Trade in your next-gen tech effortlessly. Real-time online appraisal.</p>
+          <p>Trade in your existing tech effortlessly with instant online appraisal.</p>
           <button className="secondary">
             Get your estimate <b>→</b>
           </button>
         </div>
-        <div className="promo-art phone-art">▱</div>
+        <div className="promo-motif" aria-hidden="true">
+          <svg width="88" height="88" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="6" y="2" width="12" height="20" rx="2.5" />
+            <line x1="10" y1="18" x2="14" y2="18" />
+          </svg>
+        </div>
       </article>
       <article className="promo premium">
         <div>
-          <p className="kicker">ELECTROHAVEN PREMIUM</p>
+          <p className="kicker">ELECTROHAVEN MEMBERSHIP</p>
           <h2>
             Express shipping &amp;
             <br />
-            exclusive deals
+            priority drops
           </h2>
-          <p>Unlock members-only early access to drops and product launches.</p>
+          <p>Unlock early access to flagship launches, extended warranty perks, and curated deals.</p>
           <button className="secondary">
             Become a member <b>→</b>
           </button>
         </div>
-        <div className="promo-art premium-art">✦</div>
+        <div className="promo-motif" aria-hidden="true">
+          <svg width="88" height="88" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2Z" />
+          </svg>
+        </div>
       </article>
     </section>
   );
@@ -1149,21 +1375,21 @@ function Footer({ onNavigate }) {
               onNavigate('Home');
             }}
           >
-            <span className="logo-mark">E</span>
+            <span className="logo-mark">
+              <BrandMark size={17} />
+            </span>
             <span>
               Electro<span>Haven</span>
             </span>
           </a>
           <p>
-            Powering your future with
-            <br />
-            the world's best technology.
+            Authorised multi-brand destination for curated personal tech, audio, and workspace hardware.
           </p>
           <div className="socials">
-            <button>◎</button>
-            <button>𝕏</button>
-            <button>in</button>
-            <button>◉</button>
+            <button type="button" aria-label="Instagram">IG</button>
+            <button type="button" aria-label="X">𝕏</button>
+            <button type="button" aria-label="LinkedIn">in</button>
+            <button type="button" aria-label="YouTube">YT</button>
           </div>
         </div>
         {[
@@ -1198,9 +1424,7 @@ function Footer({ onNavigate }) {
       </p>
       <div className="footer-bottom">
         <span>© 2026 ElectroHaven Electronics. All rights reserved.</span>
-        <span>
-          Made for the curious. <b>✦</b>
-        </span>
+        <span>Pan-India Express Shipping · Authorised Brand Warranty</span>
       </div>
     </footer>
   );
@@ -1208,20 +1432,52 @@ function Footer({ onNavigate }) {
 
 export default function App() {
   const initialRoute = useMemo(() => parseCurrentRoute(), []);
+  const initialUser = useMemo(() => getCurrentUser(), []);
+  const isProtectedRoute = (page) => page === 'Checkout' || page === 'Orders' || page === 'Profile';
 
-  const [activeNav, setActiveNav] = useState(() => initialRoute.page);
+  // Authentication State
+  const [user, setUser] = useState(() => initialUser);
+  const [authReturnTo, setAuthReturnTo] = useState(() => {
+    if (isProtectedRoute(initialRoute.page) && !initialUser) {
+      return initialRoute.page;
+    }
+    try {
+      const saved = sessionStorage.getItem('electrohaven_auth_return_to');
+      return saved && saved !== 'Auth' && saved !== 'Home' ? saved : 'Profile';
+    } catch {
+      return 'Profile';
+    }
+  });
+  const [authInitialMode, setAuthInitialMode] = useState('login');
+
+  const [activeNav, setActiveNav] = useState(() => {
+    if (isProtectedRoute(initialRoute.page) && !initialUser) {
+      return 'Auth';
+    }
+    if (initialRoute.page === 'Auth' && initialUser) {
+      return 'Profile';
+    }
+    return initialRoute.page;
+  });
   const [category, setCategory] = useState(() => initialRoute.category || 'all');
   const [search, setSearch] = useState(() => initialRoute.query || '');
   const [submittedSearch, setSubmittedSearch] = useState(() => initialRoute.query || '');
   const [viewedProductId, setViewedProductId] = useState(() => initialRoute.productId || null);
 
-  // Dynamic products list connected to Admin Central
+  // Dynamic products & offers connected to Admin Central
   const [products, setProducts] = useState(() => getAdminProducts());
+  const [dealOffers, setDealOffers] = useState(() => getAdminDealOffers());
+  const [offerClockTick, setOfferClockTick] = useState(0);
 
-  // Authentication State
-  const [user, setUser] = useState(() => getCurrentUser());
-  const [authReturnTo, setAuthReturnTo] = useState('Home');
-  const [authInitialMode, setAuthInitialMode] = useState('login');
+  const effectiveProducts = useMemo(
+    () => applyOffersToProducts(products, dealOffers, new Date()),
+    [products, dealOffers, offerClockTick]
+  );
+
+  const hotDealsProducts = useMemo(
+    () => getHotDealProducts(effectiveProducts),
+    [effectiveProducts]
+  );
 
   // Cart & Checkout State (persisted via localStorage)
   const [cart, setCart] = useState(() => getStoredCart());
@@ -1253,16 +1509,30 @@ export default function App() {
     seedDemoAccountIfNeeded();
   }, []);
 
+  // Periodically check active timed offers so expired offers clear automatically
+  useEffect(() => {
+    const hasExpiringOffers = dealOffers.some(
+      (o) => o && o.status !== 'inactive' && o.validUntil && isOfferCurrentlyActive(o)
+    );
+    if (!hasExpiringOffers) return undefined;
+    const timer = setInterval(() => setOfferClockTick((t) => t + 1), 30000);
+    return () => clearInterval(timer);
+  }, [dealOffers]);
+
   // Multi-Channel Real-Time Pub/Sub Synchronization (BroadcastChannel, StorageEvent & WebSockets)
   useEffect(() => {
     const unsubscribe = subscribeToRealtimeSync((message) => {
-      if (message.entity === 'products') {
-        const latest = getAdminProducts();
-        setProducts(latest);
+      if (message.entity === 'products' || message.entity === 'offers' || message.entity === 'coupons') {
+        const latestProducts = getAdminProducts();
+        const latestOffers = getAdminDealOffers();
+        setProducts(latestProducts);
+        setDealOffers(latestOffers);
+        setOfferClockTick((t) => t + 1);
 
+        const resolvedLatest = applyOffersToProducts(latestProducts, latestOffers);
         // Instantly synchronize cart items with new prices, titles, images, and discounts!
         setCart((currentCart) => {
-          const synced = synchronizeCartWithLatestProducts(currentCart, latest);
+          const synced = synchronizeCartWithLatestProducts(currentCart, resolvedLatest);
           saveStoredCart(synced);
           return synced;
         });
@@ -1330,16 +1600,41 @@ export default function App() {
 
   const cartCount = useMemo(() => cart.reduce((total, item) => total + item.quantity, 0), [cart]);
   const comparedProducts = useMemo(
-    () => products.filter((product) => compareIds.includes(product.id)),
-    [products, compareIds]
+    () => effectiveProducts.filter((product) => compareIds.includes(product.id)),
+    [effectiveProducts, compareIds]
   );
 
   // Synchronize dynamic routing with URL path, hashchange and history popstate
   useEffect(() => {
-    persistRoute(initialRoute, true);
+    if (isProtectedRoute(initialRoute.page) && !initialUser) {
+      persistRoute({ page: 'Auth' }, true);
+    } else if (initialRoute.page === 'Auth' && initialUser) {
+      persistRoute({ page: 'Profile' }, true);
+    } else {
+      persistRoute(initialRoute, true);
+    }
 
     const handleLocationChange = () => {
       const route = parseCurrentRoute();
+      const activeUser = getCurrentUser();
+
+      if ((route.page === 'Checkout' || route.page === 'Orders' || route.page === 'Profile') && !activeUser) {
+        try {
+          sessionStorage.setItem('electrohaven_auth_return_to', route.page);
+        } catch {}
+        setAuthReturnTo(route.page);
+        setAuthInitialMode('login');
+        setActiveNav('Auth');
+        setViewedProductId(null);
+        return;
+      }
+
+      if (route.page === 'Auth' && activeUser) {
+        setActiveNav('Profile');
+        setViewedProductId(null);
+        persistRoute({ page: 'Profile' }, true);
+        return;
+      }
 
       if (route.page === 'Product' && route.productId) {
         setViewedProductId(route.productId);
@@ -1450,7 +1745,12 @@ export default function App() {
     }
 
     // Protected routes check: Checkout, Orders, Profile
-    if ((item === 'Checkout' || item === 'Orders' || item === 'Profile') && !user) {
+    const effectiveUser =
+      options.authenticatedUser !== undefined ? options.authenticatedUser : (user || getCurrentUser());
+    if ((item === 'Checkout' || item === 'Orders' || item === 'Profile') && !effectiveUser) {
+      try {
+        sessionStorage.setItem('electrohaven_auth_return_to', item);
+      } catch {}
       setAuthReturnTo(item);
       setAuthInitialMode('login');
       setActiveNav('Auth');
@@ -1492,13 +1792,20 @@ export default function App() {
     if (item !== 'Product') {
       setViewedProductId(null);
     }
-    persistRoute({ page: item });
+    persistRoute({ page: item }, Boolean(options.replace));
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const openAuthPage = (mode = 'login', returnTarget = 'Home') => {
+  const openAuthPage = (mode = 'login', returnTarget = 'Profile') => {
+    const resolvedTarget =
+      returnTarget && returnTarget !== 'Auth' && returnTarget !== 'Home'
+        ? returnTarget
+        : 'Profile';
+    try {
+      sessionStorage.setItem('electrohaven_auth_return_to', resolvedTarget);
+    } catch {}
     setAuthInitialMode(mode);
-    setAuthReturnTo(returnTarget);
+    setAuthReturnTo(resolvedTarget);
     setActiveNav('Auth');
     setMenuOpen(false);
     persistRoute({ page: 'Auth' });
@@ -1507,7 +1814,14 @@ export default function App() {
 
   const handleAuthSuccess = (authedUser, returnTarget) => {
     setUser(authedUser);
-    navigate(returnTarget || 'Home');
+    const resolvedTarget =
+      returnTarget && returnTarget !== 'Auth' && returnTarget !== 'Home'
+        ? returnTarget
+        : 'Profile';
+    try {
+      sessionStorage.removeItem('electrohaven_auth_return_to');
+    } catch {}
+    navigate(resolvedTarget, { authenticatedUser: authedUser, replace: true });
   };
 
   const handleLogout = () => {
@@ -1601,7 +1915,7 @@ export default function App() {
     }
   };
 
-  const viewedProduct = products.find((product) => product.id === viewedProductId);
+  const viewedProduct = effectiveProducts.find((product) => product.id === viewedProductId);
 
   // Dedicated Full-Width Admin Dashboard View
   if (activeNav === 'Admin') {
@@ -1627,7 +1941,7 @@ export default function App() {
         wishlistCount={wishlist.length}
         search={search}
         setSearch={setSearch}
-        products={products}
+        products={effectiveProducts}
         onSearchSubmit={handleSearchSubmit}
         onViewProduct={viewProduct}
         onSelectCategory={handleNavigateCategory}
@@ -1641,7 +1955,7 @@ export default function App() {
         onStores={() => navigate('Stores')}
         preferredStore={preferredStore}
         user={user}
-        onOpenAuth={(mode) => openAuthPage(mode, 'Home')}
+        onOpenAuth={(mode) => openAuthPage(mode, 'Profile')}
         onOpenProfile={() => navigate('Profile')}
         onOpenOrders={() => navigate('Orders')}
         onOpenAdmin={() => navigate('Admin')}
@@ -1659,7 +1973,7 @@ export default function App() {
         theme={theme}
         onToggleTheme={toggleTheme}
         user={user}
-        onOpenAuth={(mode) => openAuthPage(mode, 'Home')}
+        onOpenAuth={(mode) => openAuthPage(mode, 'Profile')}
         onOpenSupport={() => setSupportModalOpen(true)}
         onLogout={handleLogout}
       />
@@ -1685,6 +1999,7 @@ export default function App() {
             onNavigateWishlist={() => navigate('Wishlist')}
             onNavigateCart={() => navigate('Cart')}
             onContinueShopping={() => navigate('Home')}
+            onPromptLogin={(target) => openAuthPage('login', target)}
           />
         ) : activeNav === 'Checkout' ? (
           <CheckoutPage
@@ -1719,7 +2034,7 @@ export default function App() {
         ) : activeNav === 'Search' ? (
           <SearchResultsPage
             query={submittedSearch || search}
-            allProducts={products}
+            allProducts={effectiveProducts}
             addToCart={addToCart}
             wishlist={wishlist}
             toggleWishlist={toggleWishlist}
@@ -1747,7 +2062,7 @@ export default function App() {
             toggleCompare={toggleCompare}
             onContinueShopping={() => navigate('Home')}
             onViewProduct={viewProduct}
-            products={products}
+            products={effectiveProducts}
           />
         ) : activeNav === 'Cart' ? (
           <CartPage
@@ -1788,7 +2103,7 @@ export default function App() {
           />
         ) : activeNav === 'Build Setup' || activeNav === 'SetupBuilder' ? (
           <SetupBuilderPage
-            allProducts={products}
+            allProducts={effectiveProducts}
             onAddToCart={addToCart}
             onAddMultipleToCart={addMultipleToCart}
             onViewProduct={viewProduct}
@@ -1803,7 +2118,7 @@ export default function App() {
         ) : activeNav === 'Comparison' ? (
           <ComparisonPage
             selectedProducts={comparedProducts}
-            allProducts={products}
+            allProducts={effectiveProducts}
             onRemove={toggleCompare}
             onAddProduct={(id) => {
               if (!compareIds.includes(id) && compareIds.length < 4) {
@@ -1818,8 +2133,19 @@ export default function App() {
         ) : activeNav === 'Home' ? (
           <>
             <Hero onBuildSetup={() => navigate('Build Setup')} />
-            <CategorySection selected={category} setSelected={setCategory} products={products} />
+            <CategorySection selected={category} setSelected={setCategory} products={effectiveProducts} />
             <Benefits />
+            <HotDealsSection
+              deals={hotDealsProducts}
+              search={search}
+              addToCart={addToCart}
+              wishlist={wishlist}
+              toggleWishlist={toggleWishlist}
+              compareIds={compareIds}
+              toggleCompare={toggleCompare}
+              onViewProduct={viewProduct}
+              onViewAllDeals={() => navigate('Deals')}
+            />
             <ProductSection
               filter={category}
               search={search}
@@ -1830,7 +2156,7 @@ export default function App() {
               toggleCompare={toggleCompare}
               onViewProduct={viewProduct}
               onNavigate={navigate}
-              products={products}
+              products={effectiveProducts}
             />
             <Brands />
             <Compare onViewProduct={viewProduct} />
@@ -1846,7 +2172,7 @@ export default function App() {
             compareIds={compareIds}
             toggleCompare={toggleCompare}
             onViewProduct={viewProduct}
-            products={products}
+            products={effectiveProducts}
           />
         )}
       </main>

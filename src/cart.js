@@ -1,3 +1,5 @@
+import { isOfferCurrentlyActive, isOfferExpired } from './dealsUtils.js';
+
 export const FREE_SHIPPING_THRESHOLD = 4747;
 export const STANDARD_DELIVERY_FEE = 99;
 export const EXPRESS_DELIVERY_FEE = 149;
@@ -40,15 +42,19 @@ export function getCartSubtotal(items) {
   return (items || []).reduce((total, item) => total + (item.price || 0) * (item.quantity || 1), 0);
 }
 
-export function getActiveCoupons() {
+export function getAllStoredCoupons() {
   try {
     const raw = localStorage.getItem('electrohaven_coupons');
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      if (Array.isArray(parsed)) return parsed;
     }
   } catch {}
   return availableCoupons;
+}
+
+export function getActiveCoupons() {
+  return getAllStoredCoupons().filter((c) => isOfferCurrentlyActive(c));
 }
 
 export function validateCoupon(code, subtotal) {
@@ -56,14 +62,14 @@ export function validateCoupon(code, subtotal) {
     return { valid: false, message: 'Please enter a coupon code.' };
   }
 
-  const couponsList = getActiveCoupons();
+  const couponsList = getAllStoredCoupons();
   const coupon = couponsList.find((item) => item.code === code.trim().toUpperCase());
 
   if (!coupon) {
     return { valid: false, message: 'Invalid coupon code. Try SAVE10, WELCOME500, or FESTIVE2000.' };
   }
 
-  if (coupon.status === 'inactive') {
+  if (coupon.status === 'inactive' || isOfferExpired(coupon)) {
     return { valid: false, message: `Coupon ${coupon.code} is currently disabled or expired.` };
   }
 

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { logoutUser } from './auth';
 import { getStoredAddresses, saveStoredAddress } from './cart';
 
@@ -9,7 +9,13 @@ export default function UserProfilePage({
   onNavigateWishlist,
   onNavigateCart,
   onContinueShopping,
+  onPromptLogin,
 }) {
+  useEffect(() => {
+    if (!user && onPromptLogin) {
+      onPromptLogin('Profile');
+    }
+  }, [user, onPromptLogin]);
   const [addresses, setAddresses] = useState(() => getStoredAddresses());
   const [showAddAddress, setShowAddAddress] = useState(false);
   const [newFullName, setNewFullName] = useState(user?.name || '');
@@ -66,9 +72,16 @@ export default function UserProfilePage({
       <div className="section empty-state">
         <h2>Please Sign In</h2>
         <p>You need to be signed in to view your profile.</p>
-        <button className="primary" onClick={onContinueShopping}>
-          Go to Storefront <b>→</b>
-        </button>
+        <div style={{ display: 'flex', gap: '12px', justifyContent: 'center', flexWrap: 'wrap' }}>
+          {onPromptLogin && (
+            <button className="primary" type="button" onClick={() => onPromptLogin('Profile')}>
+              Sign In / Register <b>→</b>
+            </button>
+          )}
+          <button className="secondary" type="button" onClick={onContinueShopping}>
+            Go to Storefront <b>→</b>
+          </button>
+        </div>
       </div>
     );
   }

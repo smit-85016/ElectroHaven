@@ -63,6 +63,9 @@ if (typeof window !== 'undefined' && typeof window.addEventListener === 'functio
       case 'electrohaven_coupons':
         entity = 'coupons';
         break;
+      case 'electrohaven_deal_offers':
+        entity = 'offers';
+        break;
       case 'electrohaven_orders':
         entity = 'orders';
         break;
@@ -159,8 +162,9 @@ export function synchronizeCartWithLatestProducts(cart, latestProducts) {
     const nameChanged = product.name !== item.name;
     const imageChanged = product.image !== item.image;
     const descChanged = product.description !== item.description;
+    const discountChanged = product.discount !== item.discount;
 
-    if (priceChanged || oldPriceChanged || nameChanged || imageChanged || descChanged) {
+    if (priceChanged || oldPriceChanged || nameChanged || imageChanged || descChanged || discountChanged) {
       changed = true;
       return {
         ...item,

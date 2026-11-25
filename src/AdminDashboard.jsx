@@ -27,11 +27,26 @@ import {
   updateAdminCoupon,
   toggleAdminCouponStatus,
   deleteAdminCoupon,
+  getAdminDealOffers,
+  addAdminDealOffer,
+  updateAdminDealOffer,
+  toggleAdminDealOfferStatus,
+  deleteAdminDealOffer,
   seedAdminUserIfNeeded,
   DEFAULT_ADMIN_EMAIL,
   ADMIN_DATA_CHANGED_EVENT,
 } from './adminData';
-import { loginUser, isAdminUser } from './auth';
+import {
+  DEAL_OFFER_TYPES,
+  applyOffersToProducts,
+  getHotDealProducts,
+  isOfferCurrentlyActive,
+  isOfferExpired,
+  isProductEligibleForHotDeals,
+  isProductFeaturedInHotDeals,
+  doesOfferApplyToProduct,
+} from './dealsUtils';
+import { loginUser, isAdminUser, logoutUser } from './auth';
 import { handleProductImageError } from './imageUtils';
 import './AdminDashboard.css';
 
@@ -43,7 +58,18 @@ export default function AdminDashboard({
   onToggleTheme,
 }) {
   const [activeTab, setActiveTab] = useState('overview');
+  const [inventoryFilterRequest, setInventoryFilterRequest] = useState({ filter: 'all', seq: 0 });
   const [toastMessage, setToastMessage] = useState(null);
+
+  const handleNavigateTab = (tabName, options = {}) => {
+    if (tabName === 'inventory') {
+      setInventoryFilterRequest((prev) => ({
+        filter: options.stockFilter || 'all',
+        seq: prev.seq + 1,
+      }));
+    }
+    setActiveTab(tabName);
+  };
 
   // Core Data States
   const [products, setProducts] = useState(() => getAdminProducts());
@@ -51,7 +77,13 @@ export default function AdminDashboard({
   const [orders, setOrders] = useState(() => getAdminOrders());
   const [users, setUsers] = useState(() => getAdminUsers());
   const [coupons, setCoupons] = useState(() => getAdminCoupons());
+  const [dealOffers, setDealOffers] = useState(() => getAdminDealOffers());
   const [inventoryMap, setInventoryMap] = useState(() => getAdminStoreInventoryMap());
+
+  const resolvedProducts = useMemo(
+    () => applyOffersToProducts(products, dealOffers),
+    [products, dealOffers]
+  );
 
   // Security gate state
   const isAuthedAdmin = useMemo(() => isAdminUser(currentUser), [currentUser]);
@@ -69,6 +101,7 @@ export default function AdminDashboard({
     setOrders(getAdminOrders());
     setUsers(getAdminUsers());
     setCoupons(getAdminCoupons());
+    setDealOffers(getAdminDealOffers());
     setInventoryMap(getAdminStoreInventoryMap());
   };
 
@@ -142,45 +175,45 @@ export default function AdminDashboard({
       <nav className="admin-nav-tabs">
         <button
           className={activeTab === 'overview' ? 'active' : ''}
-          onClick={() => setActiveTab('overview')}
+          onClick={() => handleNavigateTab('overview')}
         >
           📊 Overview
         </button>
         <button
           className={activeTab === 'products' ? 'active' : ''}
-          onClick={() => setActiveTab('products')}
+          onClick={() => handleNavigateTab('products')}
         >
           📦 Products <span className="tab-count">{products.length}</span>
         </button>
         <button
           className={activeTab === 'stores' ? 'active' : ''}
-          onClick={() => setActiveTab('stores')}
+          onClick={() => handleNavigateTab('stores')}
         >
           🏬 Stores <span className="tab-count">{stores.length}</span>
         </button>
         <button
           className={activeTab === 'inventory' ? 'active' : ''}
-          onClick={() => setActiveTab('inventory')}
+          onClick={() => handleNavigateTab('inventory')}
         >
           📋 Inventory
         </button>
         <button
           className={activeTab === 'orders' ? 'active' : ''}
-          onClick={() => setActiveTab('orders')}
+          onClick={() => handleNavigateTab('orders')}
         >
           🛍️ Orders <span className="tab-count">{orders.length}</span>
         </button>
         <button
           className={activeTab === 'users' ? 'active' : ''}
-          onClick={() => setActiveTab('users')}
+          onClick={() => handleNavigateTab('users')}
         >
           👥 Users <span className="tab-count">{users.length}</span>
         </button>
         <button
           className={activeTab === 'offers' ? 'active' : ''}
-          onClick={() => setActiveTab('offers')}
+          onClick={() => handleNavigateTab('offers')}
         >
-          🏷️ Offers &amp; Deals <span className="tab-count">{coupons.length}</span>
+          🏷️ Offers &amp; Deals <span className="tab-count">{dealOffers.length + coupons.length}</span>
         </button>
       </nav>
 
@@ -193,7 +226,7 @@ export default function AdminDashboard({
             orders={orders}
             users={users}
             coupons={coupons}
-            onNavigateTab={setActiveTab}
+            onNavigateTab={handleNavigateTab}
             onUpdateOrderStatus={(id, status) => {
               updateAdminOrderStatus(id, status);
               reloadAllData();
@@ -205,6 +238,7 @@ export default function AdminDashboard({
         {activeTab === 'products' && (
           <ProductsTab
             products={products}
+            resolvedProducts={resolvedProducts}
             stores={stores}
             onAddProduct={(data) => {
               const created = addAdminProduct(data);
@@ -222,9 +256,16 @@ export default function AdminDashboard({
               showToast(`Product deleted successfully`, 'info');
             }}
             onToggleHotDeal={(id, isDeal, discount) => {
+              if (isDeal) {
+                const candidate = resolvedProducts.find((item) => Number(item.id) === Number(id));
+                if (candidate && !isProductEligibleForHotDeals(candidate)) {
+                  showToast('Only products with ≥20% discount or an active Flash Sale / Price Crash offer can be featured in Hot Deals.', 'error');
+                  return;
+                }
+              }
               toggleAdminProductHotDeal(id, isDeal, discount);
               reloadAllData();
-              showToast(isDeal ? 'Marked as Hot Deal' : 'Removed from Hot Deals');
+              showToast(isDeal ? 'Featured in Hot Deals' : 'Removed from Hot Deals');
             }}
           />
         )}
@@ -258,6 +299,8 @@ export default function AdminDashboard({
           <InventoryTab
             products={products}
             stores={stores}
+            initialStockFilter={inventoryFilterRequest.filter}
+            filterRequestSeq={inventoryFilterRequest.seq}
             onUpdateStock={(pId, sId, qty) => {
               updateAdminProductStoreStock(pId, sId, qty);
               reloadAllData();
@@ -338,7 +381,43 @@ export default function AdminDashboard({
         {activeTab === 'offers' && (
           <OffersTab
             products={products}
+            resolvedProducts={resolvedProducts}
             coupons={coupons}
+            dealOffers={dealOffers}
+            onAddDealOffer={(data) => {
+              const res = addAdminDealOffer(data);
+              if (!res.success) {
+                showToast(res.error, 'error');
+              } else {
+                reloadAllData();
+                showToast(`Offer "${res.offer.title}" created`);
+              }
+            }}
+            onUpdateDealOffer={(offerId, data) => {
+              const res = updateAdminDealOffer(offerId, data);
+              if (!res.success) {
+                showToast(res.error, 'error');
+              } else {
+                reloadAllData();
+                showToast(`Offer "${res.offer.title}" updated`);
+              }
+            }}
+            onToggleDealOffer={(offerId) => {
+              const res = toggleAdminDealOfferStatus(offerId);
+              if (res.success) {
+                reloadAllData();
+                showToast(
+                  res.offer.status === 'inactive'
+                    ? `Offer "${res.offer.title}" disabled`
+                    : `Offer "${res.offer.title}" enabled`
+                );
+              }
+            }}
+            onDeleteDealOffer={(offerId) => {
+              deleteAdminDealOffer(offerId);
+              reloadAllData();
+              showToast('Promotional offer deleted; product catalog prices preserved.', 'info');
+            }}
             onAddCoupon={(data) => {
               const res = addAdminCoupon(data);
               if (!res.success) {
@@ -349,9 +428,13 @@ export default function AdminDashboard({
               }
             }}
             onUpdateCoupon={(code, data) => {
-              updateAdminCoupon(code, data);
-              reloadAllData();
-              showToast(`Coupon ${code} updated`);
+              const res = updateAdminCoupon(code, data);
+              if (!res.success) {
+                showToast(res.error, 'error');
+              } else {
+                reloadAllData();
+                showToast(`Coupon ${code} updated`);
+              }
             }}
             onToggleCoupon={(code) => {
               toggleAdminCouponStatus(code);
@@ -364,9 +447,16 @@ export default function AdminDashboard({
               showToast(`Coupon deleted`, 'info');
             }}
             onToggleHotDeal={(id, isDeal, discount) => {
+              if (isDeal) {
+                const candidate = resolvedProducts.find((item) => Number(item.id) === Number(id));
+                if (candidate && !isProductEligibleForHotDeals(candidate)) {
+                  showToast('Only products with ≥20% discount or an active Flash Sale / Price Crash offer can be featured in Hot Deals.', 'error');
+                  return;
+                }
+              }
               toggleAdminProductHotDeal(id, isDeal, discount);
               reloadAllData();
-              showToast(isDeal ? 'Added to Hot Deals' : 'Removed from Hot Deals');
+              showToast(isDeal ? 'Featured in storefront Hot Deals' : 'Removed from storefront Hot Deals');
             }}
           />
         )}
@@ -415,7 +505,12 @@ function OverviewTab({ products, stores, orders, users, coupons, onNavigateTab, 
     <div className="admin-overview">
       {/* KPI Cards */}
       <div className="kpi-grid">
-        <div className="kpi-card">
+        <button
+          type="button"
+          className="kpi-card kpi-card-interactive"
+          onClick={() => onNavigateTab('products')}
+          aria-label="Open Products Management"
+        >
           <div className="kpi-header">
             <span className="kpi-icon">📦</span>
             <span className="kpi-trend positive">+100% active</span>
@@ -423,9 +518,14 @@ function OverviewTab({ products, stores, orders, users, coupons, onNavigateTab, 
           <strong className="kpi-value">{products.length}</strong>
           <span className="kpi-label">Total Catalog Products</span>
           <small className="kpi-sub">Across 8 Categories</small>
-        </div>
+        </button>
 
-        <div className="kpi-card">
+        <button
+          type="button"
+          className="kpi-card kpi-card-interactive"
+          onClick={() => onNavigateTab('orders')}
+          aria-label="Open Orders Management to view revenue"
+        >
           <div className="kpi-header">
             <span className="kpi-icon">💰</span>
             <span className="kpi-trend positive">Live Gross</span>
@@ -433,9 +533,14 @@ function OverviewTab({ products, stores, orders, users, coupons, onNavigateTab, 
           <strong className="kpi-value">{formatINR(totalRevenue)}</strong>
           <span className="kpi-label">Total Store Revenue</span>
           <small className="kpi-sub">{orders.length} lifetime orders placed</small>
-        </div>
+        </button>
 
-        <div className="kpi-card">
+        <button
+          type="button"
+          className="kpi-card kpi-card-interactive"
+          onClick={() => onNavigateTab('orders')}
+          aria-label="Open Order Management"
+        >
           <div className="kpi-header">
             <span className="kpi-icon">🛍️</span>
             <span className="kpi-trend positive">Pan-India</span>
@@ -446,9 +551,14 @@ function OverviewTab({ products, stores, orders, users, coupons, onNavigateTab, 
             {orders.filter((o) => o.orderStatus === 'Delivered').length} completed ·{' '}
             {orders.filter((o) => o.orderStatus === 'Processing' || !o.orderStatus).length} in fulfillment
           </small>
-        </div>
+        </button>
 
-        <div className="kpi-card">
+        <button
+          type="button"
+          className="kpi-card kpi-card-interactive"
+          onClick={() => onNavigateTab('users')}
+          aria-label="Open User Management"
+        >
           <div className="kpi-header">
             <span className="kpi-icon">👥</span>
             <span className="kpi-trend">Verified</span>
@@ -456,23 +566,22 @@ function OverviewTab({ products, stores, orders, users, coupons, onNavigateTab, 
           <strong className="kpi-value">{users.length}</strong>
           <span className="kpi-label">Registered Users</span>
           <small className="kpi-sub">{users.filter((u) => u.role === 'admin').length} Admins · {users.filter((u) => u.role !== 'admin').length} Customers</small>
-        </div>
+        </button>
 
-        <div className="kpi-card warning">
+        <button
+          type="button"
+          className="kpi-card kpi-card-interactive warning"
+          onClick={() => onNavigateTab('inventory', { stockFilter: 'low' })}
+          aria-label="Open Inventory Management with low-stock filter applied"
+        >
           <div className="kpi-header">
             <span className="kpi-icon">⚠️</span>
             <span className="kpi-trend negative">Action Required</span>
           </div>
           <strong className="kpi-value">{lowStockCount}</strong>
           <span className="kpi-label">Low Stock Alerts</span>
-          <button
-            type="button"
-            className="kpi-action-link"
-            onClick={() => onNavigateTab('inventory')}
-          >
-            Review &amp; Restock →
-          </button>
-        </div>
+          <span className="kpi-action-link">Review &amp; Restock →</span>
+        </button>
       </div>
 
       {/* Quick Action Bar */}
@@ -638,7 +747,22 @@ function OverviewTab({ products, stores, orders, users, coupons, onNavigateTab, 
    TAB 2: PRODUCT MANAGEMENT
    ========================================================================== */
 
-function ProductsTab({ products, stores, onAddProduct, onUpdateProduct, onDeleteProduct, onToggleHotDeal }) {
+function ProductsTab({
+  products,
+  resolvedProducts = products,
+  stores,
+  onAddProduct,
+  onUpdateProduct,
+  onDeleteProduct,
+  onToggleHotDeal,
+}) {
+  const resolvedById = useMemo(() => {
+    const map = {};
+    resolvedProducts.forEach((rp) => {
+      map[Number(rp.id)] = rp;
+    });
+    return map;
+  }, [resolvedProducts]);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [modalMode, setModalMode] = useState(null); // 'add' | 'edit' | null
@@ -722,6 +846,9 @@ function ProductsTab({ products, stores, onAddProduct, onUpdateProduct, onDelete
           <tbody>
             {filteredProducts.map((p) => {
               const totalStock = getAdminProductTotalStock(p.id);
+              const resolved = resolvedById[Number(p.id)] || p;
+              const isFeaturedDeal = isProductFeaturedInHotDeals(resolved);
+              const isEligibleDeal = isProductEligibleForHotDeals(resolved);
               return (
                 <tr key={p.id}>
                   <td className="product-thumb-cell">
@@ -741,11 +868,11 @@ function ProductsTab({ products, stores, onAddProduct, onUpdateProduct, onDelete
                     <span className="category-badge">{p.category}</span>
                   </td>
                   <td>
-                    <strong>{formatINR(p.price)}</strong>
-                    {p.oldPrice > p.price && (
-                      <del className="old-price-cell">{formatINR(p.oldPrice)}</del>
+                    <strong>{formatINR(resolved.price)}</strong>
+                    {resolved.oldPrice > resolved.price && (
+                      <del className="old-price-cell">{formatINR(resolved.oldPrice)}</del>
                     )}
-                    {p.discount && <span className="discount-tag">{p.discount}</span>}
+                    {resolved.discount && <span className="discount-tag">{resolved.discount}</span>}
                   </td>
                   <td>
                     <span className={`stock-badge ${totalStock === 0 ? 'out' : totalStock <= 6 ? 'low' : 'in'}`}>
@@ -755,11 +882,17 @@ function ProductsTab({ products, stores, onAddProduct, onUpdateProduct, onDelete
                   <td>
                     <button
                       type="button"
-                      className={`deal-toggle-btn ${p.isHotDeal ? 'active' : ''}`}
-                      onClick={() => onToggleHotDeal(p.id, !p.isHotDeal)}
-                      title="Toggle Hot Deal showcase"
+                      className={`deal-toggle-btn ${isFeaturedDeal ? 'active' : ''}`}
+                      onClick={() => onToggleHotDeal(p.id, !isFeaturedDeal)}
+                      title={
+                        isFeaturedDeal
+                          ? 'Click to remove from Hot Deals'
+                          : isEligibleDeal
+                          ? 'Click to feature in Hot Deals'
+                          : 'Requires ≥20% discount or an active Flash Sale / Price Crash offer'
+                      }
                     >
-                      {p.isHotDeal ? '★ Hot Deal' : '☆ Regular'}
+                      {isFeaturedDeal ? '★ Featured' : isEligibleDeal ? '☆ Eligible' : '☆ Regular'}
                     </button>
                   </td>
                   <td className="actions-cell">
@@ -827,6 +960,11 @@ function ProductsTab({ products, stores, onAddProduct, onUpdateProduct, onDelete
         <ProductFormModal
           mode={modalMode}
           product={editingProduct}
+          isCurrentlyFeatured={
+            editingProduct
+              ? isProductFeaturedInHotDeals(resolvedById[Number(editingProduct.id)] || editingProduct)
+              : false
+          }
           stores={stores}
           onClose={() => {
             setModalMode(null);
@@ -847,7 +985,8 @@ function ProductsTab({ products, stores, onAddProduct, onUpdateProduct, onDelete
   );
 }
 
-function ProductFormModal({ mode, product, stores, onClose, onSave }) {
+function ProductFormModal({ mode, product, isCurrentlyFeatured = false, stores, onClose, onSave }) {
+  const [hotDealTouched, setHotDealTouched] = useState(false);
   const [formData, setFormData] = useState({
     name: product?.name || '',
     category: product?.category || 'phones',
@@ -859,7 +998,12 @@ function ProductFormModal({ mode, product, stores, onClose, onSave }) {
     reviews: product?.reviews || '150+',
     description: product?.description || '',
     image: product?.image || '/products/apple-iphone-16-pro.jpg',
-    isHotDeal: Boolean(product?.isHotDeal),
+    isHotDeal:
+      mode === 'edit'
+        ? product?.isHotDeal === false
+          ? false
+          : Boolean(product?.isHotDeal || isCurrentlyFeatured)
+        : Boolean(product?.isHotDeal),
     initialStock: 12,
     specs: {
       display: product?.specifications?.display || '6.7" OLED 120Hz',
@@ -891,7 +1035,11 @@ function ProductFormModal({ mode, product, stores, onClose, onSave }) {
       alert('Please enter a product title.');
       return;
     }
-    onSave(formData);
+    const payload =
+      mode === 'edit' && !hotDealTouched
+        ? { ...formData, isHotDeal: product?.isHotDeal }
+        : formData;
+    onSave(payload);
   };
 
   return (
@@ -980,7 +1128,10 @@ function ProductFormModal({ mode, product, stores, onClose, onSave }) {
                   type="checkbox"
                   id="dealCheckbox"
                   checked={formData.isHotDeal}
-                  onChange={(e) => setFormData({ ...formData, isHotDeal: e.target.checked })}
+                  onChange={(e) => {
+                    setHotDealTouched(true);
+                    setFormData({ ...formData, isHotDeal: e.target.checked });
+                  }}
                 />
                 <label htmlFor="dealCheckbox">Feature in ElectroHaven Hot Deals section</label>
               </div>
@@ -1473,10 +1624,21 @@ function StoreFormModal({ mode, store, onClose, onSave }) {
    TAB 4: INVENTORY MANAGEMENT (PER-STORE & CROSS-STORE)
    ========================================================================== */
 
-function InventoryTab({ products, stores, onUpdateStock, onQuickRestockAll }) {
+function InventoryTab({
+  products,
+  stores,
+  initialStockFilter = 'all',
+  filterRequestSeq = 0,
+  onUpdateStock,
+  onQuickRestockAll,
+}) {
   const [selectedStoreId, setSelectedStoreId] = useState(stores[0]?.id || 'eh-store-amd-01');
-  const [stockFilter, setStockFilter] = useState('all'); // 'all' | 'low' | 'out'
+  const [stockFilter, setStockFilter] = useState(initialStockFilter); // 'all' | 'low' | 'out'
   const [searchTerm, setSearchTerm] = useState('');
+
+  useEffect(() => {
+    setStockFilter(initialStockFilter || 'all');
+  }, [initialStockFilter, filterRequestSeq]);
 
   const currentStore = useMemo(() => {
     return stores.find((s) => s.id === selectedStoreId) || stores[0];
@@ -2352,99 +2514,237 @@ function CreateUserModal({ onClose, onCreate }) {
 }
 
 /* ==========================================================================
-   TAB 7: OFFERS & COUPONS MANAGEMENT
+   TAB 7: OFFERS & DEALS MANAGEMENT
    ========================================================================== */
 
-function OffersTab({ products, coupons, onAddCoupon, onUpdateCoupon, onToggleCoupon, onDeleteCoupon, onToggleHotDeal }) {
-  const [modalOpen, setModalOpen] = useState(false);
+function OffersTab({
+  products,
+  resolvedProducts = products,
+  coupons,
+  dealOffers = [],
+  onAddDealOffer,
+  onUpdateDealOffer,
+  onToggleDealOffer,
+  onDeleteDealOffer,
+  onAddCoupon,
+  onUpdateCoupon,
+  onToggleCoupon,
+  onDeleteCoupon,
+  onToggleHotDeal,
+}) {
+  const [couponModal, setCouponModal] = useState(null); // null | { mode: 'create' | 'edit', coupon?: object }
+  const [offerModal, setOfferModal] = useState(null); // null | { mode: 'create' | 'edit', offer?: object, presetProductId?: number }
+  const [showcaseFilter, setShowcaseFilter] = useState('eligible'); // 'eligible' | 'featured' | 'all'
+  const [showcaseSearch, setShowcaseSearch] = useState('');
 
-  const hotDealsProducts = useMemo(() => {
-    return products.filter((p) => p.isHotDeal || (p.discount && p.discount.includes('OFF')));
-  }, [products]);
+  const hotDealsProducts = useMemo(
+    () => getHotDealProducts(resolvedProducts),
+    [resolvedProducts]
+  );
+
+  const showcaseProducts = useMemo(() => {
+    const query = showcaseSearch.trim().toLowerCase();
+    return resolvedProducts
+      .filter((p) => {
+        if (showcaseFilter === 'featured' && !isProductFeaturedInHotDeals(p)) return false;
+        if (showcaseFilter === 'eligible' && !isProductEligibleForHotDeals(p)) return false;
+        if (
+          query &&
+          !p.name.toLowerCase().includes(query) &&
+          !(p.category || '').toLowerCase().includes(query)
+        ) {
+          return false;
+        }
+        return true;
+      })
+      .sort((a, b) => {
+        const aFeat = isProductFeaturedInHotDeals(a) ? 1 : 0;
+        const bFeat = isProductFeaturedInHotDeals(b) ? 1 : 0;
+        if (bFeat !== aFeat) return bFeat - aFeat;
+        const aElig = isProductEligibleForHotDeals(a) ? 1 : 0;
+        const bElig = isProductEligibleForHotDeals(b) ? 1 : 0;
+        if (bElig !== aElig) return bElig - aElig;
+        return (b.discountPercent || 0) - (a.discountPercent || 0);
+      });
+  }, [resolvedProducts, showcaseFilter, showcaseSearch]);
+
+  const activeOffersCount = dealOffers.filter((o) => isOfferCurrentlyActive(o)).length;
 
   return (
     <div className="admin-offers-tab">
       <div className="tab-actions-bar">
         <div>
           <h2>Promotional Offers, Coupons &amp; Hot Deals</h2>
-          <p>Create cart promo codes and configure homepage Hot Deals drops</p>
+          <p>
+            Manage Flash Sale &amp; Price Crash campaigns, cart promo codes, and featured storefront Hot Deals
+          </p>
         </div>
 
-        <button
-          type="button"
-          className="admin-primary-btn"
-          onClick={() => setModalOpen(true)}
-        >
-          <span>➕</span> Create New Coupon
-        </button>
+        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            className="admin-primary-btn"
+            onClick={() => setOfferModal({ mode: 'create' })}
+          >
+            <span>⚡</span> Create Promotional Offer
+          </button>
+          <button
+            type="button"
+            className="admin-btn secondary"
+            onClick={() => setCouponModal({ mode: 'create' })}
+          >
+            <span>➕</span> Create Cart Coupon
+          </button>
+        </div>
       </div>
 
-      {/* Coupons Grid */}
-      <h3>Active &amp; Available Cart Coupons</h3>
-      <div className="coupons-admin-grid">
-        {coupons.map((c) => (
-          <div key={c.code} className={`coupon-admin-card ${c.status === 'inactive' ? 'disabled' : ''}`}>
-            <div className="coupon-card-header">
-              <strong className="coupon-code-pill">{c.code}</strong>
-              <span className={`status-pill ${c.status === 'inactive' ? 'cancelled' : 'delivered'}`}>
-                {c.status === 'inactive' ? 'Disabled' : 'Active'}
-              </span>
-            </div>
-
-            <p className="coupon-desc">{c.description}</p>
-
-            <div className="coupon-math-details">
-              <div>
-                <small>Discount</small>
-                <strong>{c.type === 'percentage' ? `${c.value}% OFF` : formatINR(c.value)}</strong>
-              </div>
-              <div>
-                <small>Min Order</small>
-                <strong>{formatINR(c.minimumSpend || 0)}</strong>
-              </div>
-              {c.maximumDiscount && (
-                <div>
-                  <small>Max Cap</small>
-                  <strong>{formatINR(c.maximumDiscount)}</strong>
-                </div>
-              )}
-            </div>
-
-            <div className="coupon-card-actions">
-              <button
-                type="button"
-                className="admin-btn small secondary"
-                onClick={() => onToggleCoupon(c.code)}
-              >
-                {c.status === 'inactive' ? 'Enable' : 'Disable'}
-              </button>
-              <button
-                type="button"
-                className="admin-btn small danger"
-                onClick={() => onDeleteCoupon(c.code)}
-              >
-                🗑️ Delete
-              </button>
-            </div>
+      {/* Promotional Product Offers (Flash Sale, Price Crash, Special Discounts) */}
+      <div className="offers-campaigns-section">
+        <div className="section-head">
+          <div>
+            <h3>
+              Promotional Product Offers ({activeOffersCount} active · {dealOffers.length} total)
+            </h3>
+            <p>
+              Flash Sale, Price Crash, and high-discount events automatically update affected product prices and Hot Deals eligibility
+            </p>
           </div>
-        ))}
+        </div>
+
+        {dealOffers.length === 0 ? (
+          <div className="panel-empty">
+            No promotional product campaigns created yet. Create a <strong>Flash Sale</strong> or{' '}
+            <strong>Price Crash</strong> offer to discount specific products or categories cleanly without altering catalog base prices.
+          </div>
+        ) : (
+          <div className="coupons-admin-grid">
+            {dealOffers.map((offer) => {
+              const expired = isOfferExpired(offer);
+              const active = isOfferCurrentlyActive(offer);
+              const meta = DEAL_OFFER_TYPES[offer.offerType] || DEAL_OFFER_TYPES.deal_discount;
+              const affectedCount = products.filter((p) => doesOfferApplyToProduct(offer, p)).length;
+              const targetSummary =
+                offer.scope === 'all'
+                  ? `All Catalog (${affectedCount})`
+                  : offer.scope === 'category'
+                  ? `Category: ${offer.category} (${affectedCount})`
+                  : `${affectedCount} Selected Product${affectedCount === 1 ? '' : 's'}`;
+
+              return (
+                <div
+                  key={offer.id}
+                  className={`coupon-admin-card ${!active ? 'disabled' : ''}`}
+                >
+                  <div className="coupon-card-header">
+                    <strong className="coupon-code-pill">
+                      {offer.offerType === 'flash_sale' ? '⚡' : offer.offerType === 'price_crash' ? '🔥' : '🏷️'}{' '}
+                      {meta.label}
+                    </strong>
+                    <span
+                      className={`status-pill ${
+                        expired ? 'cancelled' : offer.status === 'inactive' ? 'cancelled' : 'delivered'
+                      }`}
+                    >
+                      {expired ? 'Expired' : offer.status === 'inactive' ? 'Disabled' : 'Active'}
+                    </span>
+                  </div>
+
+                  <h4 style={{ margin: '0 0 6px', fontSize: '14px' }}>{offer.title}</h4>
+                  <p className="coupon-desc">
+                    Scope: <strong>{targetSummary}</strong>
+                    {offer.validUntil ? ` · Expires ${offer.validUntil}` : ' · No expiry'}
+                  </p>
+
+                  <div className="coupon-math-details">
+                    <div>
+                      <small>Offer Discount</small>
+                      <strong>
+                        {offer.discountType === 'fixed'
+                          ? `${formatINR(offer.discountValue)} OFF`
+                          : `${offer.discountValue}% OFF`}
+                      </strong>
+                    </div>
+                    <div>
+                      <small>Affected Products</small>
+                      <strong>{affectedCount}</strong>
+                    </div>
+                  </div>
+
+                  <div className="coupon-card-actions">
+                    <button
+                      type="button"
+                      className="admin-btn small secondary"
+                      onClick={() => setOfferModal({ mode: 'edit', offer })}
+                    >
+                      ✏️ Edit
+                    </button>
+                    <button
+                      type="button"
+                      className="admin-btn small secondary"
+                      onClick={() => onToggleDealOffer(offer.id)}
+                    >
+                      {offer.status === 'inactive' ? 'Enable' : 'Disable'}
+                    </button>
+                    <button
+                      type="button"
+                      className="admin-btn small danger"
+                      onClick={() => onDeleteDealOffer(offer.id)}
+                    >
+                      🗑️ Delete
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* Hot Deals Showcase Configurator */}
       <div className="hot-deals-admin-section">
-        <div className="section-head">
+        <div className="section-head" style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px', alignItems: 'flex-end' }}>
           <div>
             <h3>Hot Deals Showcase ({hotDealsProducts.length} items currently featured)</h3>
-            <p>Products featured on the homepage Deals marquee and the Deals category page</p>
+            <p>
+              Synchronized with the Homepage Hot Deals section and Deals page. Only products with ≥20% discount, Flash Sale, or Price Crash offers are eligible.
+            </p>
+          </div>
+          <div className="showcase-filter-controls" style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+            <input
+              type="text"
+              className="admin-search-input"
+              style={{ minWidth: '210px', padding: '7px 12px' }}
+              placeholder="Search showcase products..."
+              value={showcaseSearch}
+              onChange={(e) => setShowcaseSearch(e.target.value)}
+            />
+            {[
+              ['eligible', 'Eligible Deals'],
+              ['featured', `Featured (${hotDealsProducts.length})`],
+              ['all', `All Catalog (${resolvedProducts.length})`],
+            ].map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                className={`pill-btn ${showcaseFilter === key ? 'active' : ''}`}
+                onClick={() => setShowcaseFilter(key)}
+              >
+                {label}
+              </button>
+            ))}
           </div>
         </div>
 
         <div className="deals-products-strip">
-          {products.slice(0, 16).map((p) => {
-            const isDeal = p.isHotDeal || (p.discount && p.discount.includes('OFF'));
+          {showcaseProducts.map((p) => {
+            const isEligible = isProductEligibleForHotDeals(p);
+            const isFeatured = isProductFeaturedInHotDeals(p);
 
             return (
-              <div key={p.id} className={`deal-toggle-card ${isDeal ? 'active-deal' : ''}`}>
+              <div
+                key={p.id}
+                className={`deal-toggle-card ${isFeatured ? 'active-deal' : ''}`}
+              >
                 <img
                   src={p.image}
                   alt={p.name}
@@ -2452,27 +2752,142 @@ function OffersTab({ products, coupons, onAddCoupon, onUpdateCoupon, onToggleCou
                 />
                 <div className="deal-card-meta">
                   <strong>{p.name}</strong>
-                  <span>{formatINR(p.price)} {p.discount && `(${p.discount})`}</span>
+                  <div className="deal-card-pricing">
+                    <b>{formatINR(p.price)}</b>
+                    {p.oldPrice > p.price && <del>{formatINR(p.oldPrice)}</del>}
+                  </div>
+                  <span>{p.discount || (p.discountPercent > 0 ? `${p.discountPercent}% OFF` : 'Regular MRP')}</span>
                 </div>
-                <button
-                  type="button"
-                  className={`deal-action-btn ${isDeal ? 'remove' : 'add'}`}
-                  onClick={() => onToggleHotDeal(p.id, !isDeal)}
-                >
-                  {isDeal ? '✓ Featured in Deals' : '+ Add to Deals'}
-                </button>
+
+                {isFeatured ? (
+                  <button
+                    type="button"
+                    className="deal-action-btn remove"
+                    onClick={() => onToggleHotDeal(p.id, false)}
+                  >
+                    Remove from Deals
+                  </button>
+                ) : isEligible ? (
+                  <button
+                    type="button"
+                    className="deal-action-btn add"
+                    onClick={() => onToggleHotDeal(p.id, true)}
+                  >
+                    Feature in Deals
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="deal-action-btn add"
+                    onClick={() => setOfferModal({ mode: 'create', presetProductId: p.id })}
+                    title="Discount is below 20%. Create a Flash Sale or Price Crash offer to include this product in Hot Deals."
+                  >
+                    + Add Flash Sale / Offer
+                  </button>
+                )}
               </div>
             );
           })}
         </div>
       </div>
 
-      {modalOpen && (
-        <CreateCouponModal
-          onClose={() => setModalOpen(false)}
+      {/* Coupons Grid */}
+      <div className="hot-deals-admin-section">
+        <h3>Active &amp; Available Cart Coupons ({coupons.filter((c) => isOfferCurrentlyActive(c)).length} active)</h3>
+        <div className="coupons-admin-grid">
+          {coupons.map((c) => {
+            const expired = isOfferExpired(c);
+            const disabledOrExpired = c.status === 'inactive' || expired;
+            return (
+              <div key={c.code} className={`coupon-admin-card ${disabledOrExpired ? 'disabled' : ''}`}>
+                <div className="coupon-card-header">
+                  <strong className="coupon-code-pill">{c.code}</strong>
+                  <span className={`status-pill ${disabledOrExpired ? 'cancelled' : 'delivered'}`}>
+                    {expired ? 'Expired' : c.status === 'inactive' ? 'Disabled' : 'Active'}
+                  </span>
+                </div>
+
+                <p className="coupon-desc">
+                  {c.description}
+                  {c.validUntil ? ` · Valid until ${c.validUntil}` : ''}
+                </p>
+
+                <div className="coupon-math-details">
+                  <div>
+                    <small>Discount</small>
+                    <strong>{c.type === 'percentage' ? `${c.value}% OFF` : formatINR(c.value)}</strong>
+                  </div>
+                  <div>
+                    <small>Min Order</small>
+                    <strong>{formatINR(c.minimumSpend || 0)}</strong>
+                  </div>
+                  {c.maximumDiscount && (
+                    <div>
+                      <small>Max Cap</small>
+                      <strong>{formatINR(c.maximumDiscount)}</strong>
+                    </div>
+                  )}
+                </div>
+
+                <div className="coupon-card-actions">
+                  <button
+                    type="button"
+                    className="admin-btn small secondary"
+                    onClick={() => setCouponModal({ mode: 'edit', coupon: c })}
+                  >
+                    ✏️ Edit
+                  </button>
+                  <button
+                    type="button"
+                    className="admin-btn small secondary"
+                    onClick={() => onToggleCoupon(c.code)}
+                  >
+                    {c.status === 'inactive' ? 'Enable' : 'Disable'}
+                  </button>
+                  <button
+                    type="button"
+                    className="admin-btn small danger"
+                    onClick={() => onDeleteCoupon(c.code)}
+                  >
+                    🗑️ Delete
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {offerModal && (
+        <DealOfferModal
+          mode={offerModal.mode}
+          offer={offerModal.offer}
+          presetProductId={offerModal.presetProductId}
+          products={products}
+          onClose={() => setOfferModal(null)}
           onSave={(data) => {
-            onAddCoupon(data);
-            setModalOpen(false);
+            if (offerModal.mode === 'edit' && offerModal.offer) {
+              onUpdateDealOffer(offerModal.offer.id, data);
+            } else {
+              onAddDealOffer(data);
+            }
+            setOfferModal(null);
+          }}
+        />
+      )}
+
+      {couponModal && (
+        <CreateCouponModal
+          mode={couponModal.mode}
+          coupon={couponModal.coupon}
+          onClose={() => setCouponModal(null)}
+          onSave={(data) => {
+            if (couponModal.mode === 'edit' && couponModal.coupon) {
+              onUpdateCoupon(couponModal.coupon.code, data);
+            } else {
+              onAddCoupon(data);
+            }
+            setCouponModal(null);
           }}
         />
       )}
@@ -2480,13 +2895,199 @@ function OffersTab({ products, coupons, onAddCoupon, onUpdateCoupon, onToggleCou
   );
 }
 
-function CreateCouponModal({ onClose, onSave }) {
-  const [code, setCode] = useState('');
-  const [description, setDescription] = useState('');
-  const [type, setType] = useState('percentage');
-  const [value, setValue] = useState(15);
-  const [minimumSpend, setMinimumSpend] = useState(2000);
-  const [maximumDiscount, setMaximumDiscount] = useState(1500);
+function DealOfferModal({ mode = 'create', offer = null, presetProductId = null, products = [], onClose, onSave }) {
+  const [title, setTitle] = useState(offer?.title || '');
+  const [offerType, setOfferType] = useState(offer?.offerType || 'flash_sale');
+  const [discountType, setDiscountType] = useState(offer?.discountType || 'percentage');
+  const [discountValue, setDiscountValue] = useState(offer?.discountValue || 25);
+  const [scope, setScope] = useState(offer?.scope || 'products');
+  const [category, setCategory] = useState(offer?.category || 'phones');
+  const [selectedIds, setSelectedIds] = useState(
+    Array.isArray(offer?.productIds)
+      ? offer.productIds.map(Number)
+      : presetProductId
+      ? [Number(presetProductId)]
+      : []
+  );
+  const [validUntil, setValidUntil] = useState(offer?.validUntil || '2026-12-31');
+  const [productSearch, setProductSearch] = useState('');
+
+  const visiblePickerProducts = useMemo(() => {
+    const q = productSearch.trim().toLowerCase();
+    if (!q) return products;
+    return products.filter(
+      (p) => p.name.toLowerCase().includes(q) || (p.category || '').toLowerCase().includes(q)
+    );
+  }, [products, productSearch]);
+
+  const toggleProductSelection = (id) => {
+    const numId = Number(id);
+    setSelectedIds((prev) =>
+      prev.includes(numId) ? prev.filter((item) => item !== numId) : [...prev, numId]
+    );
+  };
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (!title.trim()) {
+      alert('Please enter an offer title.');
+      return;
+    }
+    if (scope === 'products' && selectedIds.length === 0) {
+      alert('Please select at least one product for this offer.');
+      return;
+    }
+
+    onSave({
+      title: title.trim(),
+      offerType,
+      discountType,
+      discountValue: Number(discountValue),
+      scope,
+      category: scope === 'category' ? category : '',
+      productIds: scope === 'products' ? selectedIds : [],
+      validUntil: validUntil.trim(),
+      status: offer?.status || 'active',
+    });
+  };
+
+  return (
+    <div className="admin-modal-backdrop">
+      <div className="admin-modal large-modal">
+        <div className="modal-header">
+          <h2>{mode === 'edit' ? '✏️ Edit Promotional Offer' : '⚡ Create Promotional Offer'}</h2>
+          <button type="button" className="close-btn" onClick={onClose}>✕</button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="admin-form">
+          <div className="form-grid">
+            <div className="form-group span-2">
+              <label>Offer Campaign Title *</label>
+              <input
+                type="text"
+                required
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="e.g. Weekend Audio Flash Sale"
+              />
+            </div>
+
+            <div className="form-group">
+              <label>Offer Type *</label>
+              <select value={offerType} onChange={(e) => setOfferType(e.target.value)}>
+                <option value="flash_sale">Flash Sale</option>
+                <option value="price_crash">Price Crash</option>
+                <option value="deal_discount">Special Discount (20%+ Deal)</option>
+              </select>
+            </div>
+
+            <div className="form-group">
+              <label>Valid Until (Expiry Date)</label>
+              <input
+                type="date"
+                value={validUntil}
+                onChange={(e) => setValidUntil(e.target.value)}
+              />
+            </div>
+
+            <div className="form-group">
+              <label>Discount Type *</label>
+              <select value={discountType} onChange={(e) => setDiscountType(e.target.value)}>
+                <option value="percentage">Percentage (%) Off</option>
+                <option value="fixed">Flat Rupee (₹) Amount Off</option>
+              </select>
+            </div>
+
+            <div className="form-group">
+              <label>{discountType === 'percentage' ? 'Discount Percentage (%)' : 'Flat Discount (₹)'} *</label>
+              <input
+                type="number"
+                required
+                min="1"
+                max={discountType === 'percentage' ? 90 : undefined}
+                value={discountValue}
+                onChange={(e) => setDiscountValue(e.target.value)}
+              />
+            </div>
+
+            <div className="form-group">
+              <label>Apply Offer To *</label>
+              <select value={scope} onChange={(e) => setScope(e.target.value)}>
+                <option value="products">Selected Products</option>
+                <option value="category">Specific Category</option>
+                <option value="all">All Catalog Products</option>
+              </select>
+            </div>
+
+            {scope === 'category' && (
+              <div className="form-group">
+                <label>Target Category *</label>
+                <select value={category} onChange={(e) => setCategory(e.target.value)}>
+                  <option value="phones">Phones</option>
+                  <option value="laptops">Laptops</option>
+                  <option value="headphones">Headphones / Audio</option>
+                  <option value="cameras">Cameras</option>
+                  <option value="gaming">Gaming</option>
+                  <option value="wearables">Wearables</option>
+                  <option value="smart home">Smart Home</option>
+                  <option value="accessories">Accessories</option>
+                </select>
+              </div>
+            )}
+
+            {scope === 'products' && (
+              <div className="form-group span-2">
+                <label>Select Target Products ({selectedIds.length} selected) *</label>
+                <input
+                  type="text"
+                  className="admin-search-input"
+                  style={{ marginBottom: '8px' }}
+                  placeholder="Search products to attach..."
+                  value={productSearch}
+                  onChange={(e) => setProductSearch(e.target.value)}
+                />
+                <div className="offer-products-picker">
+                  {visiblePickerProducts.map((p) => {
+                    const checked = selectedIds.includes(Number(p.id));
+                    return (
+                      <label key={p.id} className={`offer-picker-row ${checked ? 'selected' : ''}`}>
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleProductSelection(p.id)}
+                        />
+                        <span>#{p.id} {p.name}</span>
+                        <small>{formatINR(p.price)}</small>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="modal-actions">
+            <button type="button" className="admin-btn secondary" onClick={onClose}>
+              Cancel
+            </button>
+            <button type="submit" className="admin-btn primary">
+              {mode === 'edit' ? 'Save Offer Changes' : 'Launch Promotional Offer'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function CreateCouponModal({ mode = 'create', coupon = null, onClose, onSave }) {
+  const [code, setCode] = useState(coupon?.code || '');
+  const [description, setDescription] = useState(coupon?.description || '');
+  const [type, setType] = useState(coupon?.type || 'percentage');
+  const [value, setValue] = useState(coupon?.value ?? 15);
+  const [minimumSpend, setMinimumSpend] = useState(coupon?.minimumSpend ?? 2000);
+  const [maximumDiscount, setMaximumDiscount] = useState(coupon?.maximumDiscount ?? 1500);
+  const [validUntil, setValidUntil] = useState(coupon?.validUntil || '2026-12-31');
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -2501,7 +3102,8 @@ function CreateCouponModal({ onClose, onSave }) {
       value: Number(value),
       minimumSpend: Number(minimumSpend),
       maximumDiscount: type === 'percentage' ? Number(maximumDiscount) : null,
-      status: 'active',
+      validUntil: validUntil.trim(),
+      status: coupon?.status || 'active',
     });
   };
 
@@ -2509,7 +3111,7 @@ function CreateCouponModal({ onClose, onSave }) {
     <div className="admin-modal-backdrop">
       <div className="admin-modal small-modal">
         <div className="modal-header">
-          <h2>🏷️ Create Discount Coupon</h2>
+          <h2>{mode === 'edit' ? `✏️ Edit Coupon ${coupon?.code}` : '🏷️ Create Discount Coupon'}</h2>
           <button type="button" className="close-btn" onClick={onClose}>✕</button>
         </div>
 
@@ -2519,6 +3121,7 @@ function CreateCouponModal({ onClose, onSave }) {
             <input
               type="text"
               required
+              disabled={mode === 'edit'}
               value={code}
               onChange={(e) => setCode(e.target.value.toUpperCase())}
               placeholder="MEGA50"
@@ -2577,12 +3180,21 @@ function CreateCouponModal({ onClose, onSave }) {
             </div>
           )}
 
+          <div className="form-group">
+            <label>Valid Until (Expiry Date)</label>
+            <input
+              type="date"
+              value={validUntil}
+              onChange={(e) => setValidUntil(e.target.value)}
+            />
+          </div>
+
           <div className="modal-actions">
             <button type="button" className="admin-btn secondary" onClick={onClose}>
               Cancel
             </button>
             <button type="submit" className="admin-btn primary">
-              Create Coupon
+              {mode === 'edit' ? 'Save Changes' : 'Create Coupon'}
             </button>
           </div>
         </form>
@@ -2614,7 +3226,10 @@ function AdminSecurityGate({ currentUser, onLoginSuccess, onExitToStore }) {
         return;
       }
 
-      if (res.user.role !== 'admin' && res.user.email?.toLowerCase() !== DEFAULT_ADMIN_EMAIL.toLowerCase()) {
+      if (!isAdminUser(res.user)) {
+        if (!currentUser) {
+          logoutUser();
+        }
         setError('Access Denied: This account does not possess administrative privileges.');
         setLoading(false);
         return;

@@ -116,62 +116,72 @@ function saveStoredUsers(users) {
   }
 }
 
+let seedingPromise = null;
+
 /**
  * Seeds default accounts (Customer demo + Master Admin) if needed.
  * Customer demo: alex.sharma@example.com / Password@123
  * Master Admin:  admin@electrohaven.com  / Admin@123
  */
-export async function seedDemoAccountIfNeeded() {
-  const users = getStoredUsers();
-  let modified = false;
+export function seedDemoAccountIfNeeded() {
+  if (seedingPromise) return seedingPromise;
 
-  const demoEmail = 'alex.sharma@example.com';
-  if (!users.some((u) => u.email.toLowerCase() === demoEmail)) {
-    const salt = generateSalt();
-    const passwordHash = await hashPassword('Password@123', salt);
-    const demoUser = {
-      id: 'usr_demo_alex_sharma',
-      name: 'Alex Sharma',
-      email: demoEmail,
-      phone: '9876543210',
-      passwordHash,
-      passwordSalt: salt,
-      emailVerified: true,
-      phoneVerified: true,
-      createdAt: new Date('2026-01-15T10:00:00.000Z').toISOString(),
-      avatar: 'AS',
-      role: 'customer',
-      status: 'active',
-    };
-    users.push(demoUser);
-    modified = true;
-  }
+  seedingPromise = (async () => {
+    const users = getStoredUsers();
+    let modified = false;
 
-  const adminEmail = 'admin@electrohaven.com';
-  if (!users.some((u) => u.email.toLowerCase() === adminEmail)) {
-    const adminSalt = generateSalt();
-    const adminHash = await hashPassword('Admin@123', adminSalt);
-    const adminUser = {
-      id: 'usr_admin_master_1',
-      name: 'ElectroHaven Administrator',
-      email: adminEmail,
-      phone: '9898012345',
-      passwordHash: adminHash,
-      passwordSalt: adminSalt,
-      emailVerified: true,
-      phoneVerified: true,
-      createdAt: new Date('2026-01-01T00:00:00.000Z').toISOString(),
-      avatar: 'AD',
-      role: 'admin',
-      status: 'active',
-    };
-    users.unshift(adminUser);
-    modified = true;
-  }
+    const demoEmail = 'alex.sharma@example.com';
+    if (!users.some((u) => u.email.toLowerCase() === demoEmail)) {
+      const salt = generateSalt();
+      const passwordHash = await hashPassword('Password@123', salt);
+      const demoUser = {
+        id: 'usr_demo_alex_sharma',
+        name: 'Alex Sharma',
+        email: demoEmail,
+        phone: '9876543210',
+        passwordHash,
+        passwordSalt: salt,
+        emailVerified: true,
+        phoneVerified: true,
+        createdAt: new Date('2026-01-15T10:00:00.000Z').toISOString(),
+        avatar: 'AS',
+        role: 'customer',
+        status: 'active',
+      };
+      users.push(demoUser);
+      modified = true;
+    }
 
-  if (modified) {
-    saveStoredUsers(users);
-  }
+    const adminEmail = 'admin@electrohaven.com';
+    if (!users.some((u) => u.email.toLowerCase() === adminEmail)) {
+      const adminSalt = generateSalt();
+      const adminHash = await hashPassword('Admin@123', adminSalt);
+      const adminUser = {
+        id: 'usr_admin_master_1',
+        name: 'ElectroHaven Administrator',
+        email: adminEmail,
+        phone: '9898012345',
+        passwordHash: adminHash,
+        passwordSalt: adminSalt,
+        emailVerified: true,
+        phoneVerified: true,
+        createdAt: new Date('2026-01-01T00:00:00.000Z').toISOString(),
+        avatar: 'AD',
+        role: 'admin',
+        status: 'active',
+      };
+      users.unshift(adminUser);
+      modified = true;
+    }
+
+    if (modified) {
+      saveStoredUsers(users);
+    }
+  })().finally(() => {
+    seedingPromise = null;
+  });
+
+  return seedingPromise;
 }
 
 /**

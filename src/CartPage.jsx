@@ -1,13 +1,14 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { formatINR } from './currency';
 import {
   getCartSubtotal,
   calculateCartTotals,
   validateCoupon,
-  availableCoupons,
+  getActiveCoupons,
   validateCartStock,
   getProductStock,
 } from './cart';
+import { subscribeToRealtimeSync } from './realtimeSync';
 import { handleProductImageError } from './imageUtils';
 
 export function CartItem({ item, onQuantityChange, onViewProduct, onRemoveItem }) {
@@ -120,6 +121,16 @@ export default function CartPage({
   const [couponInput, setCouponInput] = useState('');
   const [appliedCoupon, setAppliedCoupon] = useState('');
   const [couponError, setCouponError] = useState('');
+  const [activeCouponsList, setActiveCouponsList] = useState(() => getActiveCoupons());
+
+  useEffect(() => {
+    const unsubscribe = subscribeToRealtimeSync((msg) => {
+      if (msg.entity === 'coupons' || msg.entity === 'offers') {
+        setActiveCouponsList(getActiveCoupons());
+      }
+    });
+    return () => unsubscribe();
+  }, []);
 
   const subtotal = getCartSubtotal(cart);
   const totals = calculateCartTotals(cart, appliedCoupon);
@@ -369,21 +380,25 @@ export default function CartPage({
 
               <div className="available-coupons">
                 <span>Available offers</span>
-                {availableCoupons.map((coupon) => (
-                  <div className="coupon-option" key={coupon.code}>
-                    <div>
-                      <strong>{coupon.code}</strong>
-                      <small>{coupon.description}</small>
+                {activeCouponsList.length > 0 ? (
+                  activeCouponsList.map((coupon) => (
+                    <div className="coupon-option" key={coupon.code}>
+                      <div>
+                        <strong>{coupon.code}</strong>
+                        <small>{coupon.description}</small>
+                      </div>
+                      <button
+                        className="text-button"
+                        type="button"
+                        onClick={(event) => applyCoupon(event, coupon.code)}
+                      >
+                        {appliedCoupon === coupon.code && couponStillValid ? 'Applied' : 'Apply'}
+                      </button>
                     </div>
-                    <button
-                      className="text-button"
-                      type="button"
-                      onClick={(event) => applyCoupon(event, coupon.code)}
-                    >
-                      {appliedCoupon === coupon.code && couponStillValid ? 'Applied' : 'Apply'}
-                    </button>
-                  </div>
-                ))}
+                  ))
+                ) : (
+                  <small style={{ color: 'var(--muted)' }}>No active promo coupons available right now.</small>
+                )}
               </div>
             </div>
 

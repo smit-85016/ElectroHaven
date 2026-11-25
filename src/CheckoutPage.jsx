@@ -39,11 +39,6 @@ export default function CheckoutPage({
   // Fulfillment Mode: 'delivery' (Home Delivery) | 'store_pickup' (Click & Collect)
   const [fulfillmentType, setFulfillmentType] = useState(initialFulfillmentType || 'delivery');
 
-  // Stores List & Selection
-  const storesList = useMemo(() => getAdminStores(), []);
-  const [selectedPickupStoreId, setSelectedPickupStoreId] = useState(
-    initialPickupStore?.id || preferredStore?.id || (storesList[0] && storesList[0].id) || 'eh-store-amd-01'
-  );
   const [realtimeKey, setRealtimeKey] = useState(0);
 
   // Subscribe to real-time inventory and store updates
@@ -56,22 +51,71 @@ export default function CheckoutPage({
     return () => unsubscribe();
   }, []);
 
-  // Compute store-wise cart availability across all stores
+  // Stores List & Live Cart Stock Availability
+  const storesList = useMemo(() => getAdminStores(), [realtimeKey]);
+
   const storeAvailabilities = useMemo(() => {
     const map = {};
     storesList.forEach((store) => {
       map[store.id] = getStoreCartStockAvailability(store.id, cart);
     });
     return map;
-  }, [storesList, cart, realtimeKey]);
+  }, [storesList, cart]);
+
+  const [selectedPickupStoreId, setSelectedPickupStoreId] = useState(() => {
+    const initialStores = getAdminStores();
+    const candidates = [
+      initialPickupStore?.id,
+      preferredStore?.id,
+      ...initialStores.map((s) => s.id),
+    ].filter(Boolean);
+    for (const storeId of candidates) {
+      if (getStoreCartStockAvailability(storeId, cart).isAvailable) {
+        return storeId;
+      }
+    }
+    return '';
+  });
+
+  // Ensure selectedPickupStoreId always points to an in-stock store (or '' if none available)
+  useEffect(() => {
+    const currentlyValid =
+      selectedPickupStoreId &&
+      storesList.some((s) => s.id === selectedPickupStoreId) &&
+      storeAvailabilities[selectedPickupStoreId]?.isAvailable;
+
+    if (currentlyValid) return;
+
+    const preferredCandidates = [initialPickupStore?.id, preferredStore?.id].filter(Boolean);
+    const preferredAvailable = preferredCandidates.find(
+      (id) => storesList.some((s) => s.id === id) && storeAvailabilities[id]?.isAvailable
+    );
+    if (preferredAvailable) {
+      setSelectedPickupStoreId(preferredAvailable);
+      return;
+    }
+
+    const firstAvailable = storesList.find((s) => storeAvailabilities[s.id]?.isAvailable);
+    setSelectedPickupStoreId(firstAvailable ? firstAvailable.id : '');
+  }, [storesList, storeAvailabilities, selectedPickupStoreId, initialPickupStore, preferredStore]);
 
   const selectedStore = useMemo(() => {
-    return storesList.find((s) => s.id === selectedPickupStoreId) || storesList[0];
+    if (!selectedPickupStoreId) return null;
+    return storesList.find((s) => s.id === selectedPickupStoreId) || null;
   }, [storesList, selectedPickupStoreId]);
 
   const selectedStoreStock = useMemo(() => {
-    return storeAvailabilities[selectedStore?.id] || { isAvailable: false, outOfStockItems: [] };
+    if (!selectedStore) return { isAvailable: false, outOfStockItems: [] };
+    return storeAvailabilities[selectedStore.id] || { isAvailable: false, outOfStockItems: [] };
   }, [storeAvailabilities, selectedStore]);
+
+  const handleSelectPickupStore = (store) => {
+    const avail = storeAvailabilities[store.id];
+    if (!avail?.isAvailable) return;
+    setSelectedPickupStoreId(store.id);
+    setErrorMessage('');
+    if (onSetPreferredStore) onSetPreferredStore(store);
+  };
 
   // Saved addresses
   const [savedAddresses, setSavedAddresses] = useState(() => getStoredAddresses());
@@ -194,6 +238,11 @@ export default function CheckoutPage({
 
     // Validation for Store Pickup
     if (fulfillmentType === 'store_pickup') {
+      if (!selectedStore) {
+        setErrorMessage('Please select an available ElectroHaven store in Ahmedabad for pickup.');
+        return;
+      }
+
       if (!selectedStoreStock.isAvailable) {
         const outItems = selectedStoreStock.outOfStockItems.map((i) => i.name).join(', ');
         setErrorMessage(
@@ -331,6 +380,7 @@ export default function CheckoutPage({
             locality: selectedStore.locality,
             address: selectedStore.address,
             contact: selectedStore.contact,
+            coordinates: selectedStore.coordinates || null,
             timing: selectedStore.openingHours?.timing || selectedStore.timing || '10:30 AM – 9:30 PM',
             openingHours: selectedStore.openingHours?.days || 'Mon – Sun',
           }
@@ -503,63 +553,94 @@ export default function CheckoutPage({
                   </div>
                 </div>
 
-                <div className="checkout-store-selection-grid">
+                <div
+                  className="checkout-store-selection-grid"
+                  role="radiogroup"
+                  aria-label="Ahmedabad Store Pickup Locations"
+                >
                   {storesList.map((store) => {
                     const avail = storeAvailabilities[store.id] || { isAvailable: false, outOfStockItems: [] };
-                    const isSelected = selectedPickupStoreId === store.id;
+                    const isSelected = Boolean(selectedStore && selectedStore.id === store.id && avail.isAvailable);
+                    const inputId = `pickup-store-${store.id}`;
+                    const openingTiming = store.openingHours?.timing || store.timing || '10:30 AM – 9:30 PM';
+                    const openingDays = store.openingHours?.days || 'Monday – Sunday';
 
                     return (
-                      <div
+                      <label
                         key={store.id}
+                        htmlFor={inputId}
+                        aria-disabled={!avail.isAvailable}
                         className={`chk-store-card ${isSelected ? 'selected' : ''} ${
                           avail.isAvailable ? 'available' : 'disabled'
                         }`}
-                        onClick={() => {
-                          if (avail.isAvailable) {
-                            setSelectedPickupStoreId(store.id);
-                            if (onSetPreferredStore) onSetPreferredStore(store);
-                          }
-                        }}
                       >
                         <div className="chk-store-card-head">
                           <div className="chk-store-radio">
-                            <span className={`chk-radio-circle ${isSelected ? 'checked' : ''}`} />
-                            <strong>{store.name}</strong>
+                            <input
+                              id={inputId}
+                              type="radio"
+                              name="pickupStore"
+                              value={store.id}
+                              checked={isSelected}
+                              disabled={!avail.isAvailable}
+                              onChange={() => handleSelectPickupStore(store)}
+                              className="chk-store-radio-input"
+                            />
+                            <div className="chk-store-title-meta">
+                              <strong>{store.name}</strong>
+                              <span className="chk-store-tag">
+                                {store.locality ? `${store.locality}, Ahmedabad` : 'Ahmedabad Store'}
+                                {store.tag ? ` · ${store.tag}` : ''}
+                              </span>
+                            </div>
                           </div>
-                          <span
-                            className={`status-pill ${
-                              avail.isAvailable ? 'status-delivered' : 'status-cancelled'
-                            }`}
-                          >
-                            {avail.isAvailable
-                              ? '✓ All Items In Stock'
-                              : '✕ Insufficient Stock'}
-                          </span>
+
+                          <div className="chk-store-badges">
+                            {isSelected && (
+                              <span className="chk-selected-badge">
+                                <span aria-hidden="true">✓</span> Selected
+                              </span>
+                            )}
+                            <span
+                              className={`chk-stock-badge ${
+                                avail.isAvailable ? 'in-stock' : 'out-of-stock'
+                              }`}
+                            >
+                              {avail.isAvailable
+                                ? '✓ All Items In Stock'
+                                : '✕ Insufficient Stock'}
+                            </span>
+                          </div>
                         </div>
 
                         <p className="chk-store-address">{store.address}</p>
 
                         <div className="chk-store-details-strip">
-                          <span>🕒 {store.openingHours?.timing || '10:30 AM – 9:30 PM'}</span>
+                          <span>🕒 {openingTiming} ({openingDays.replace(' (All 7 Days)', '')})</span>
                           <span>📞 {store.contact}</span>
-                          <span className="chk-store-ready-pill">⚡ Ready in 2 Hours</span>
+                          <span className="chk-store-ready-pill">
+                            {avail.isAvailable ? '⚡ Pickup in 2 Hours' : '⏳ Out of Stock'}
+                          </span>
                         </div>
 
-                        {!avail.isAvailable && (
+                        {!avail.isAvailable && avail.outOfStockItems.length > 0 && (
                           <div className="chk-store-out-warning">
-                            Unavailable: {avail.outOfStockItems.map((i) => i.name).join(', ')}
+                            Unavailable at this store:{' '}
+                            {avail.outOfStockItems
+                              .map((i) => `${i.name} (need ${i.requestedQuantity}, ${i.availableQuantity} left)`)
+                              .join(', ')}
                           </div>
                         )}
-                      </div>
+                      </label>
                     );
                   })}
                 </div>
 
                 {/* Selected Store Highlights Box */}
-                {selectedStore && (
+                {selectedStore && selectedStoreStock.isAvailable ? (
                   <div className="selected-pickup-store-box">
                     <div className="selected-store-title-row">
-                      <span className="selected-store-icon">📍</span>
+                      <span className="selected-store-icon" aria-hidden="true">📍</span>
                       <div>
                         <small>CONFIRMED PICKUP LOCATION</small>
                         <h3>{selectedStore.name}</h3>
@@ -567,10 +648,18 @@ export default function CheckoutPage({
                     </div>
                     <p className="selected-store-full-addr">{selectedStore.address}</p>
                     <div className="selected-store-instructions">
-                      <span>✓ Ready for pickup in 2 hours</span>
+                      <span>✓ Ready for pickup in 2 hours ({selectedStore.openingHours?.timing || selectedStore.timing || '10:30 AM – 9:30 PM'})</span>
+                      <span>✓ Store Helpline: {selectedStore.contact}</span>
                       <span>✓ Please bring a Government ID &amp; your Order Confirmation Pass</span>
-                      <span>✓ Free parking &amp; unboxing assistance available</span>
                     </div>
+                  </div>
+                ) : (
+                  <div className="chk-no-store-warning" role="alert">
+                    <strong>No store has all items in stock</strong>
+                    <p>
+                      None of our Ahmedabad pickup stores currently have sufficient stock for every item in your cart.
+                      Please adjust item quantities in Cart or switch to Home Delivery above.
+                    </p>
                   </div>
                 )}
               </div>
@@ -1042,7 +1131,9 @@ export default function CheckoutPage({
                     </strong>
                     <p>
                       {fulfillmentType === 'store_pickup'
-                        ? `You can pay via Cash, Credit/Debit Card, or UPI QR code directly at the ${selectedStore.name} cashier counter when collecting your device.`
+                        ? selectedStore
+                          ? `You can pay via Cash, Credit/Debit Card, or UPI QR code directly at the ${selectedStore.name} cashier counter when collecting your device.`
+                          : 'Please select an available pickup store above to pay via Cash, Credit/Debit Card, or UPI QR code at the store counter.'
                         : 'You can pay via Cash or UPI QR Code directly to the delivery executive when your parcel arrives.'}
                     </p>
                   </div>
@@ -1071,7 +1162,13 @@ export default function CheckoutPage({
               </span>
               {fulfillmentType === 'store_pickup' && (
                 <small className="summary-store-name">
-                  Store: <strong>{selectedStore.locality}</strong>
+                  {selectedStore ? (
+                    <>
+                      Store: <strong>{selectedStore.locality || selectedStore.name}</strong>
+                    </>
+                  ) : (
+                    <span>Store: No in-stock store selected</span>
+                  )}
                 </small>
               )}
             </div>
@@ -1146,7 +1243,7 @@ export default function CheckoutPage({
               disabled={
                 isSubmitting ||
                 !stockCheck.isValid ||
-                (fulfillmentType === 'store_pickup' && !selectedStoreStock.isAvailable)
+                (fulfillmentType === 'store_pickup' && (!selectedStore || !selectedStoreStock.isAvailable))
               }
               onClick={handlePlaceOrder}
             >

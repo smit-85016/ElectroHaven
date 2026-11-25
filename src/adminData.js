@@ -14,6 +14,7 @@ export const STORAGE_KEYS = {
   STORE_INVENTORY: 'electrohaven_store_inventory',
   WAREHOUSE_STOCK: 'electrohaven_warehouse_stock',
   COUPONS: 'electrohaven_coupons',
+  DEAL_OFFERS: 'electrohaven_deal_offers',
   HOT_DEALS: 'electrohaven_hot_deals_ids',
   ORDERS: 'electrohaven_orders',
   USERS: 'electrohaven_users',
@@ -130,12 +131,17 @@ export function toggleAdminProductHotDeal(id, isDeal, customDiscount = null) {
   const product = products.find((p) => Number(p.id) === pId);
   if (!product) return null;
 
+  const naturalDiscount =
+    product.oldPrice > product.price
+      ? `${Math.round(((product.oldPrice - product.price) / product.oldPrice) * 100)}% OFF`
+      : (product.discount || '');
+
   const updatedDiscount = isDeal
-    ? (customDiscount || (product.discount && product.discount.includes('OFF') ? product.discount : '15% OFF'))
-    : (product.oldPrice > product.price ? `${Math.round(((product.oldPrice - product.price) / product.oldPrice) * 100)}% OFF` : '');
+    ? (customDiscount || product.discount || naturalDiscount)
+    : (product.oldPrice > product.price ? naturalDiscount : (product.discount || ''));
 
   return updateAdminProduct(pId, {
-    isHotDeal: isDeal,
+    isHotDeal: Boolean(isDeal),
     discount: updatedDiscount,
   });
 }
@@ -847,5 +853,147 @@ export function deleteAdminCoupon(code) {
   const coupons = getAdminCoupons();
   const filtered = coupons.filter((c) => c.code !== code.trim().toUpperCase());
   saveAdminCoupons(filtered);
+  return { success: true };
+}
+
+/* ==========================================================================
+   7. PROMOTIONAL DEAL OFFERS (FLASH SALE, PRICE CRASH & PRODUCT DISCOUNTS)
+   ========================================================================== */
+
+export function getAdminDealOffers() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.DEAL_OFFERS);
+    if (!raw) {
+      localStorage.setItem(STORAGE_KEYS.DEAL_OFFERS, JSON.stringify([]));
+      return [];
+    }
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveAdminDealOffers(offersList) {
+  try {
+    localStorage.setItem(STORAGE_KEYS.DEAL_OFFERS, JSON.stringify(offersList));
+    notifyAdminDataChanged('offers', offersList);
+  } catch (err) {
+    console.error('Failed to save deal offers:', err);
+  }
+}
+
+export function addAdminDealOffer(offerData) {
+  const offers = getAdminDealOffers();
+  const title = (offerData.title || '').trim();
+  if (!title) {
+    return { success: false, error: 'Offer title is required.' };
+  }
+
+  const offerType = offerData.offerType || 'flash_sale';
+  const discountType = offerData.discountType === 'fixed' ? 'fixed' : 'percentage';
+  const discountValue = Number(offerData.discountValue) || 0;
+  if (discountValue <= 0) {
+    return { success: false, error: 'Discount value must be greater than 0.' };
+  }
+
+  const scope = offerData.scope || 'products';
+  const productIds =
+    scope === 'products' && Array.isArray(offerData.productIds)
+      ? [...new Set(offerData.productIds.map(Number).filter(Boolean))]
+      : [];
+
+  if (scope === 'products' && productIds.length === 0) {
+    return { success: false, error: 'Please select at least one product for this offer.' };
+  }
+
+  const newOffer = {
+    id: `offer_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+    title,
+    offerType, // 'flash_sale' | 'price_crash' | 'deal_discount'
+    discountType, // 'percentage' | 'fixed'
+    discountValue,
+    scope, // 'products' | 'category' | 'all'
+    category: scope === 'category' ? (offerData.category || 'phones') : '',
+    productIds,
+    validUntil: offerData.validUntil || '',
+    status: offerData.status === 'inactive' ? 'inactive' : 'active',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+
+  const updated = [newOffer, ...offers];
+
+  if (
+    newOffer.status === 'active' &&
+    newOffer.scope === 'products' &&
+    (newOffer.offerType === 'flash_sale' || newOffer.offerType === 'price_crash') &&
+    newOffer.productIds.length > 0
+  ) {
+    const targetSet = new Set(newOffer.productIds.map(Number));
+    const currentProducts = getAdminProducts();
+    let changedProductFlag = false;
+    const nextProducts = currentProducts.map((p) => {
+      if (targetSet.has(Number(p.id)) && p.isHotDeal === false) {
+        changedProductFlag = true;
+        return { ...p, isHotDeal: true, updatedAt: new Date().toISOString() };
+      }
+      return p;
+    });
+    if (changedProductFlag) {
+      saveAdminProducts(nextProducts);
+    }
+  }
+
+  saveAdminDealOffers(updated);
+  return { success: true, offer: newOffer };
+}
+
+export function updateAdminDealOffer(offerId, updatedFields) {
+  const offers = getAdminDealOffers();
+  const index = offers.findIndex((o) => o.id === offerId);
+  if (index === -1) return { success: false, error: 'Offer not found.' };
+
+  const current = offers[index];
+  const nextScope = updatedFields.scope !== undefined ? updatedFields.scope : current.scope;
+  const nextProductIds =
+    nextScope === 'products'
+      ? updatedFields.productIds !== undefined
+        ? [...new Set(updatedFields.productIds.map(Number).filter(Boolean))]
+        : current.productIds
+      : [];
+
+  const updatedOffer = {
+    ...current,
+    ...updatedFields,
+    id: current.id,
+    scope: nextScope,
+    category: nextScope === 'category' ? (updatedFields.category ?? current.category) : '',
+    productIds: nextProductIds,
+    discountValue:
+      updatedFields.discountValue !== undefined
+        ? Number(updatedFields.discountValue)
+        : current.discountValue,
+    updatedAt: new Date().toISOString(),
+  };
+
+  offers[index] = updatedOffer;
+  saveAdminDealOffers(offers);
+  return { success: true, offer: updatedOffer };
+}
+
+export function toggleAdminDealOfferStatus(offerId) {
+  const offers = getAdminDealOffers();
+  const offer = offers.find((o) => o.id === offerId);
+  if (!offer) return { success: false, error: 'Offer not found.' };
+
+  const nextStatus = offer.status === 'inactive' ? 'active' : 'inactive';
+  return updateAdminDealOffer(offerId, { status: nextStatus });
+}
+
+export function deleteAdminDealOffer(offerId) {
+  const offers = getAdminDealOffers();
+  const filtered = offers.filter((o) => o.id !== offerId);
+  saveAdminDealOffers(filtered);
   return { success: true };
 }

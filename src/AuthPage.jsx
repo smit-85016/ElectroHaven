@@ -11,11 +11,15 @@ import {
 
 export default function AuthPage({
   initialMode = 'login', // 'login' | 'signup' | 'forgot' | 'verify'
-  returnTo = 'Home',
+  returnTo = 'Profile',
   onAuthSuccess,
   onCancel,
 }) {
   const [mode, setMode] = useState(initialMode); // 'login' | 'signup' | 'forgot' | 'reset' | 'verify'
+
+  useEffect(() => {
+    setMode(initialMode);
+  }, [initialMode]);
 
   // Login form state
   const [loginIdentifier, setLoginIdentifier] = useState('');
@@ -101,14 +105,12 @@ export default function AuthPage({
       }
 
       showToast(`Welcome back, ${res.user.name}!`);
-      setTimeout(() => {
-        if (onAuthSuccess) {
-          onAuthSuccess(res.user, returnTo);
-        }
-      }, 500);
+      setLoginLoading(false);
+      if (onAuthSuccess) {
+        onAuthSuccess(res.user, returnTo);
+      }
     } catch (err) {
       setLoginError('An unexpected error occurred during sign in. Please try again.');
-    } finally {
       setLoginLoading(false);
     }
   };
